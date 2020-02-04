@@ -15,6 +15,7 @@ class ElectricityLCAReporting():
 
     The class assumes that the current brightway project contains
     all the relevant databases, including the characterization methods.
+    Note that the convention for database names is "ecoinvent_<scenario>_<year>".
 
     :ivar scenario: name of the REMIND scenario, e.g., 'BAU', 'SCP26'.
     :vartype scenario: str
@@ -64,7 +65,7 @@ class ElectricityLCAReporting():
 
         market = "market group for electricity, low voltage"
 
-        df_lowvolt = self.sum_variables_and_add_scores(market, low_voltage)
+        df_lowvolt = self._sum_variables_and_add_scores(market, low_voltage)
 
         # medium voltage consumers
         medium_voltage = [
