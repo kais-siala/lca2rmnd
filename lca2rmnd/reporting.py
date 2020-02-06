@@ -1,13 +1,13 @@
 from . import DATA_DIR
 from .data_collection import RemindDataCollection
+from .activity_select import ActivitySelector
 
-from rmnd_lca.electricity import Electricity
+from rmnd_lca import Electricity, Geomap, InventorySet
 from rmnd_lca.utils import eidb_label
-from rmnd_lca.geomap import Geomap
 
 import brightway2 as bw
 import pandas as pd
-
+from bw2data.backends.peewee.proxies import Activity
 
 class ElectricityLCAReporting():
     """
@@ -33,7 +33,7 @@ class ElectricityLCAReporting():
                  indicatorgroup='ReCiPe Midpoint (H)'):
         self.years = years
         self.scenario = scenario
-
+        self.selector = ActivitySelector()
         self.methods = [m for m in bw.methods if m[0] == indicatorgroup]
         if not self.methods:
             raise ValueError("No methods found in the current brightway2 project for the following group: {}.".format(indicatorgroup))
@@ -130,5 +130,98 @@ class ElectricityLCAReporting():
                     lambda row: get_score(row["method"]), axis=1)
                 df.update(df_slice)
 
-        df["total_score"] = df["score"] * df["value"] * 2.8e11
+        df["total_score"] = df["score"] * df["value"] * 2.8e11 # EJ -> kWh
         return df
+
+    def report_tech_LCA(self, year, region):
+        """
+        For each REMIND technology, find a set of activities in the region.
+        Use ecoinvent tech share file to determine the shares of technologies
+        within the REMIND proxies.
+        """
+
+        tecf = pd.read_csv(DATA_DIR/"powertechs.csv", index_col="tech")
+        tecdict = tecf.to_dict()["mif_entry"]
+
+        db = bw.Database("_".join(["ecoinvent", self.scenario, str(year)]))
+
+        # read the ecoinvent techs for the entries
+        shares = self.supplier_shares(db, region)
+
+        # load energy demand
+
+        # calc LCA
+        lca = bw.LCA(shares, self.methods[0])
+
+        return shares
+
+
+    def _find_suppliers(self, db, expr, locs):
+        """
+        Return a list of supplier activites in locations `locs` matching
+        the peewee expression `expr` within `db`.
+        """
+        assert type(locs) == list
+        sel = self.selector.select(db, expr, locs)
+        if sel.count() == 0:
+            locs = ["RER"]
+        sel = self.selector.select(db, expr, locs)
+        if sel.count() == 0:
+            locs = ["RoW"]
+        sel = self.selector.select(db, expr, locs)
+        if sel.count == 0:
+            raise ValueError("No activity found for expression.")
+
+        return [Activity(a) for a in sel]
+
+    def supplier_shares(self, db, region):
+        """
+        Find the ecoinvent activities for a
+        REMIND region and the associated share of production volume.
+
+        :param db: a brightway2 database
+        :type db: brightway2.Database
+        :param region: region string ident for REMIND region
+        :type region: string
+        :return: dictionary with the format 
+            {<tech>: [
+                {<activity>: <share>}, ...
+            ],
+            ...
+            }
+        :rtype: dict
+        """
+
+        # ecoinvent locations within REMIND region
+        locs = self.geo.remind_to_ecoinvent_location(region)
+        # ecoinvent activities
+
+        vols = pd.read_csv(DATA_DIR/"electricity_production_volumes_per_tech.csv",
+                           sep=";", index_col=["dataset", "location"])
+
+        # the filters come from the rmnd_lca package
+        # this package is also used to modify the techs in the first place
+        fltrs = InventorySet(db).powerplant_filters
+        act_shares = {}
+        for tech, tech_fltr in fltrs.items():
+            expr = self.selector.create_expr(**tech_fltr)
+            acts = self._find_suppliers(db, expr, locs)
+
+            # more than one, check shares
+            if len(acts) > 1:
+                shares = {}
+                for act in acts:
+                    lookup = vols.index.isin([(act["name"], act["location"])])
+                    if any(lookup):
+                        shares[act] = vols.loc[lookup, "Sum of production volume"].iat[0]
+                    else:
+                        shares[act] = 0.
+                tot = sum(shares.values())
+                if tot == 0:
+                    act_shares[tech] = {act: 1./len(acts) for act in acts}
+                else:
+                    act_shares[tech] = {act: shares[act]/tot for act in acts}
+
+            else:
+                act_shares[tech] = {acts[0]: 1}
+        return act_shares
