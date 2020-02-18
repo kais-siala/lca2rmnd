@@ -30,7 +30,7 @@ class ElectricityLCAReporting():
 
     """
     def __init__(self, scenario, years,
-                 indicatorgroup='ReCiPe Midpoint (H)'):
+                 indicatorgroup='ReCiPe Midpoint (H) V1.13'):
         self.years = years
         self.scenario = scenario
         self.selector = ActivitySelector()
@@ -133,7 +133,7 @@ class ElectricityLCAReporting():
         df["total_score"] = df["score"] * df["value"] * 2.8e11 # EJ -> kWh
         return df
 
-    def report_tech_LCA(self, year, region):
+    def report_tech_LCA(self, year):
         """
         For each REMIND technology, find a set of activities in the region.
         Use ecoinvent tech share file to determine the shares of technologies
@@ -145,16 +145,50 @@ class ElectricityLCAReporting():
 
         db = bw.Database("_".join(["ecoinvent", self.scenario, str(year)]))
 
-        # read the ecoinvent techs for the entries
-        shares = self.supplier_shares(db, region)
+        regions = self._get_rmnd_regions()
+        result = self._cartesian_product({
+            "region": regions,
+            "tech": list(tecdict.keys()),
+            "method": self.methods
+        }).sort_index()
 
-        # load energy demand
+        for region in regions:
+            # read the ecoinvent techs for the entries
+            shares = self.supplier_shares(db, region)
 
-        # calc LCA
-        lca = bw.LCA(shares, self.methods[0])
+            for tech, acts in shares.items():
+                # calc LCA
+                lca = bw.LCA(acts, self.methods[0])
+                lca.lci()
 
-        return shares
+                for method in self.methods:
+                    lca.switch_method(method)
+                    lca.lcia()
+                    result.at[(region, tech, method), "score"] = lca.score
 
+        return result
+
+    def _cartesian_product(self, idx):
+        """
+        Create a DataFrame with an Index being the cartesian
+        product from a dictionary of lists.
+
+        From: https://stackoverflow.com/questions/58242078/cartesian-product-of-arbitrary-lists-in-pandas/58242079#58242079
+
+        :parm idx: dictionary with keys being the column names and
+            values the range of values on that column.
+        :return: a dataframe with the given index
+        :rtype: `pandas.DataFrame`
+        """
+        index = pd.MultiIndex.from_product(idx.values(), names=idx.keys())
+        return pd.DataFrame(index=index)
+
+    def _get_rmnd_regions(self):
+        """Obtain a list of REMIND regions."""
+        regionmap = pd.read_csv(
+            DATA_DIR/"remind/regionmappingH12.csv",
+            sep=";")
+        return regionmap.RegionCode.unique()
 
     def _find_suppliers(self, db, expr, locs):
         """
@@ -184,9 +218,9 @@ class ElectricityLCAReporting():
         :param region: region string ident for REMIND region
         :type region: string
         :return: dictionary with the format 
-            {<tech>: [
-                {<activity>: <share>}, ...
-            ],
+            {<tech>: {
+                <activity>: <share>, ...
+            },
             ...
             }
         :rtype: dict
