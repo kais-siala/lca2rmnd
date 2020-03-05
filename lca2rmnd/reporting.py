@@ -5,11 +5,178 @@ from .activity_select import ActivitySelector
 from rmnd_lca import Electricity, Geomap, InventorySet
 from rmnd_lca.utils import eidb_label
 
+from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 import brightway2 as bw
 import pandas as pd
 from bw2data.backends.peewee.proxies import Activity
+import time
 
-class ElectricityLCAReporting():
+class LCAReporting():
+    """
+    The base class for LCA Reports for REMIND output.
+
+    The class assumes that the current brightway project contains
+    all the relevant databases, including the characterization methods.
+    Note that the convention for database names is "ecoinvent_<scenario>_<year>".
+
+    :ivar scenario: name of the REMIND scenario, e.g., 'BAU', 'SCP26'.
+    :vartype scenario: str
+    :ivar years: years of the REMIND scenario to consider, between 2005 and 2150
+        (5 year steps for up to 2060, then 10 year steps to 2110,
+        and 20 years for the last two time steps).
+        The corresponding brightway databases have to be part of the current project.
+    :vartype year: array
+    :ivar indicatorgroup: name of the set of indicators to
+        calculate the scores for, defaults to ReCiPe Midpoint (H)
+    :vartype source_db: str
+    """
+    def __init__(self, scenario, years,
+                 indicatorgroup='ReCiPe Midpoint (H) V1.13'):
+        self.years = years
+        self.scenario = scenario
+        self.selector = ActivitySelector()
+        self.methods = [m for m in bw.methods if m[0] == indicatorgroup]
+        if not self.methods:
+            raise ValueError(("No methods found in the current brightway2"
+                              " project for the following group: {}.")
+                             .format(indicatorgroup))
+
+        # check for brightway2 databases
+        dbnames = set(["_".join(["ecoinvent", scenario, str(yr)])
+                       for yr in years])
+        missing = dbnames - set(bw.databases)
+        if missing:
+            raise ValueError(
+                "The following brightway2 databases are missing: {}"
+                .format(missing))
+        rdc = RemindDataCollection(self.scenario)
+        self.data = rdc.data[rdc.data.Year.isin(self.years)]
+        self.geo = Geomap()
+
+
+class TransportLCAReporting(LCAReporting):
+    """
+    Report LCA scores for the REMIND transport sector.
+
+    The class assumes that the current brightway project contains
+    all the relevant databases, including the characterization methods.
+    Note that the convention for database names is "ecoinvent_<scenario>_<year>".
+
+    :ivar scenario: name of the REMIND scenario, e.g., 'BAU', 'SCP26'.
+    :vartype scenario: str
+    :ivar years: years of the REMIND scenario to consider, between 2005 and 2150
+        (5 year steps for up to 2060, then 10 year steps to 2110,
+        and 20 years for the last two time steps).
+        The corresponding brightway databases have to be part of the current project.
+    :vartype year: array
+    :ivar indicatorgroup: name of the set of indicators to
+        calculate the scores for, defaults to ReCiPe Midpoint (H)
+    :vartype source_db: str
+
+    """
+
+    diesel_share = 0.15
+
+    def _act_from_variable(self, variable, db, year):
+        """
+        Find the activity for a given REMIND transport reporting variable.
+        """
+        # discard "ES|Transport"
+        varsp = variable.split("|")[2:]
+        if varsp.pop(0) == "Pass" and varsp.pop(0) == "Road":
+            if varsp.pop(0) == "LDV" and len(varsp) == 2:
+                fueltechmap = {
+                    "BEV": "BEV",
+                    "Gases": "ICEV-g",
+                    "Liquids": ["ICEV-d", "ICEV-p"],
+                    "FCEV": "FCEV",
+                    "Hybrid Electric": "PHEV",
+                    "Hybrid Liquids": "HEV-p"
+                }
+                veh_size = varsp.pop(0)
+                tech = varsp.pop(0)
+
+                pretag = "Passenger car"
+                if tech == "Liquids":
+                    diesel_str = ", ".join([pretag, "ICEV-d", veh_size, str(year)])
+                    petrol_str = ", ".join([pretag, "ICEV-p", veh_size, str(year)])
+                    diesel_act = Activity(
+                        Act.get((Act.name == diesel_str)
+                                & (Act.database == db.name)))
+                    petrol_act = Activity(
+                        Act.get((Act.name == petrol_str)
+                                & (Act.database == db.name)))
+                    return {
+                        diesel_act: self.diesel_share,
+                        petrol_act: 1 - self.diesel_share
+                    }
+                else:
+                    act_str = ", ".join(
+                            [pretag, fueltechmap[tech],
+                             veh_size, str(year)])
+                    return {
+                        Activity(
+                            Act.get((Act.name == act_str)
+                                    & (Act.database == db.name))): 1}
+
+    def report_LDV_LCA(self):
+        """
+        Report per-drivetrain impacts along the given dimension.
+        Both per-pkm as well as total numbers are given.
+
+        :return: a dataframe with impacts for the REMIND EDGE-T
+            transport sector model. Levelized impacts (per pkm) are
+            found in the column `score_pkm`, total impacts in `total_score`.
+        :rtype: pandas.DataFrame
+
+        """
+        # available variables
+        variables = [
+            var for var in self.data.Variable.unique()
+            if var.startswith("ES|Transport|Pass|Road|LDV")
+            and "Two-Wheelers" not in var]
+        # only high detail entries
+        variables = [var for var in variables if len(var.split("|")) == 7]
+
+        df = self.data[self.data.Variable.isin(variables)]
+
+        df["score_pkm"] = 0.
+        # add methods dimension & score column
+        methods_df = pd.DataFrame({"Method": self.methods, "score_pkm": 0.})
+        df = df.merge(methods_df, "outer")  # on "score_pkm"
+
+        df.set_index(["Year", "Region", "Variable", "Method"], inplace=True)
+        start = time.time()
+        # calc score
+        for year in self.years:
+            # find activities which at the moment do not depend
+            # on regions
+            db = bw.Database(eidb_label(self.scenario, year))
+            act_lookup = {
+                var: self._act_from_variable(var, db, year)
+                for var in variables}
+            for region in df.index.get_level_values(1).unique():
+                for var in (df.loc[(year, region)]
+                            .index.get_level_values(0)
+                            .unique()):
+                    lca = bw.LCA(act_lookup[var],
+                                 method=self.methods[0])
+                    # build inventories
+                    lca.lci()
+
+                    for method in self.methods:
+                        lca.switch_method(method)
+                        lca.lcia()
+                        df.loc[(year, region, var, method),
+                               "score_pkm"] = lca.score
+        print("Calculation took {} seconds.".format(time.time() - start))
+        df["total_score"] = df["value"] * df["score_pkm"] * 1e9
+        df.reset_index(inplace=True)
+        return df[["Region", "Year", "Variable", "Method",
+                   "total_score", "score_pkm"]]
+
+
+class ElectricityLCAReporting(LCAReporting):
     """
     Report LCA scores for the REMIND electricity sector.
 
@@ -29,24 +196,6 @@ class ElectricityLCAReporting():
     :vartype source_db: str
 
     """
-    def __init__(self, scenario, years,
-                 indicatorgroup='ReCiPe Midpoint (H) V1.13'):
-        self.years = years
-        self.scenario = scenario
-        self.selector = ActivitySelector()
-        self.methods = [m for m in bw.methods if m[0] == indicatorgroup]
-        if not self.methods:
-            raise ValueError("No methods found in the current brightway2 project for the following group: {}.".format(indicatorgroup))
-
-        # check for brightway2 databases
-        dbnames = set(["_".join(["ecoinvent", scenario, str(yr)]) for yr in years])
-        missing = dbnames - set(bw.databases)
-        if missing:
-            raise ValueError("The following brightway2 databases are missing: {}".format(missing))
-        rdc = RemindDataCollection(self.scenario)
-        self.data = rdc.data[rdc.data.Year.isin(self.years)]
-        self.geo = Geomap()
-
     def report_sectoral_LCA(self):
         """
         Report sectoral averages for the electricity sector based on the (updated)
@@ -217,7 +366,7 @@ class ElectricityLCAReporting():
         :type db: brightway2.Database
         :param region: region string ident for REMIND region
         :type region: string
-        :return: dictionary with the format 
+        :return: dictionary with the format
             {<tech>: {
                 <activity>: <share>, ...
             },
