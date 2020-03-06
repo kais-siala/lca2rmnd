@@ -1,3 +1,23 @@
+"""Module to prepare the ecoinvent databases for reporting LCA results
+for REMIND scenarios using the carculator inventories, see
+
+https://github.com/romainsacchi/carculator
+
+Usage example:
+    years = [2015, 2050]
+    scenario = "BAU"
+    roject_name = "transport_lca"
+
+    fpei36 = "ecoinvent/ecoinvent 3.6_cut-off_ecoSpold02/datasets/"
+    create_project(project_name, ecoinvent_path, years, scenario)
+    load_and_merge(scenario, years)
+
+    # test
+    act = bw.Database("ecoinvent_BAU_2015").random()
+    bw.LCA({act: 1}, bw.methods.random()).lci()
+
+"""
+
 import rmnd_lca
 from bw2data.utils import merge_databases
 
@@ -59,7 +79,7 @@ def create_project(project_name, ecoinvent_path,
 
 
 def load_car_activities(year_range):
-    """Load `carculator` inventories for a ginven range of years.
+    """Load `carculator` inventories for a given range of years.
 
     :param numpy.ndarray year_range: range of years
     :returns: a brightway2 `LCIImporter` object
@@ -85,23 +105,29 @@ def load_car_activities(year_range):
 
 
 def relink_electricity_demand(eidb):
-    """
-    Relink existing electricity exchanges
-    for BEVs to REMIND-compatible (regional)
+    """Create BEV activities for REMIND regions and relink
+    existing electricity exchanges for BEVs to REMIND-compatible (regional)
     market groups.
+
+    :param eidb: a brightway2 `Database`. This database is
+        modified in place.
+
     """
     remind_regions = [
         'LAM', 'OAS', 'SSA', 'EUR',
         'NEU', 'MEA', 'REF', 'CAZ',
         'CHA', 'IND', 'JPN', 'USA']
     # find BEVs
-    bevs = [a for a in eidb if "BEV" in a["name"]]
+    bevs = [a for a in eidb if "BEV" in a["name"]
+            or "PHEV" in a["name"]]
 
     # any non-global activities found?
-    if any([act["location"] != "GLO" for act in bevs]):
+    non_glo = [act for act in bevs if act["location"] != "GLO"]
+    if non_glo:
         print(("Database is most likely already updated."
-               "Please delete existing non-GLO activities."))
-        return
+               "Deleting existing non-GLO activities."))
+        for act in non_glo:
+            act.delete()
 
     market_types = ["low", "medium", "high"]
 
@@ -142,14 +168,15 @@ def relink_electricity_demand(eidb):
                     exc.save()
 
 
-def load_and_merge(scenario, years):
+def load_and_merge(scenario, years, relink=True):
     """
     Load carculator outputs and merge them with ecoinvent
     databases for all years.
 
     :param str scenario: REMIND scenario
     :param list years: range of years
-
+    :param bool relink: create BEVs with electricity inputs
+        from market groups in REMIND regions
     """
     for year in years:
         eidb = "_".join(["ecoinvent", scenario, str(year)])
@@ -172,18 +199,5 @@ def load_and_merge(scenario, years):
 
         print("Merge carculator results with ecoinvent.")
         merge_databases(eidb, inv.db_name)
-
-
-# years = [2015, 2050]
-# scenario = "BAU"
-# project_name = "transport_lca"
-
-# bw.projects.set_current(project_name)
-
-# fpei36 = "/home/alois/ecoinvent/ecoinvent 3.6_cut-off_ecoSpold02/datasets/"
-# create_project(project_name, fpei36, years, scenario)
-# load_and_merge(scenario, years)
-
-# # test
-# act = bw.Database("ecoinvent_BAU_2015").random()
-# bw.LCA({act: 1}, bw.methods.random()).lci()
+        if relink:
+            relink_electricity_demand(eidb)
