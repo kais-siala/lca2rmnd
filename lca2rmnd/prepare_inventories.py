@@ -25,6 +25,7 @@ from carculator import CarInputParameters, \
     fill_xarray_from_input_parameters, \
     CarModel, InventoryCalculation
 
+from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 import brightway2 as bw
 import numpy as np
 
@@ -105,9 +106,9 @@ def load_car_activities(year_range):
 
 
 def relink_electricity_demand(eidb):
-    """Create BEV activities for REMIND regions and relink
-    existing electricity exchanges for BEVs to REMIND-compatible (regional)
-    market groups.
+    """Create LDV activities for REMIND regions and relink
+    existing electricity exchanges for BEVs, FCEVs, HEVs and PHEVs
+    to REMIND-compatible (regional) market groups.
 
     :param eidb: a brightway2 `Database`. This database is
         modified in place.
@@ -117,9 +118,13 @@ def relink_electricity_demand(eidb):
         'LAM', 'OAS', 'SSA', 'EUR',
         'NEU', 'MEA', 'REF', 'CAZ',
         'CHA', 'IND', 'JPN', 'USA']
-    # find BEVs
-    bevs = [a for a in eidb if "BEV" in a["name"]
-            or "PHEV" in a["name"]]
+    # find BEVs (rexexp function in peewee seems to be broken)
+    bevs = [Activity(sel) for sel in Act.select().where(
+        (Act.name.contains("BEV,")
+         | Act.name.contains("PHEV,")
+         | Act.name.contains("FCEV,")
+         | Act.name.contains("HEV-"))
+        & (Act.database == eidb.name))]
 
     # any non-global activities found?
     non_glo = [act for act in bevs if act["location"] != "GLO"]

@@ -113,8 +113,17 @@ class TransportLCAReporting(LCAReporting):
                         diesel_act: scale*(self.diesel_share),
                         petrol_act: scale*(1 - self.diesel_share)
                     }
-                elif tech in ["BEV", "Hybrid Electric"]:
-                    # these techs are regionalized
+                elif tech == "Gases":
+                    # only global activities exist
+                    act_str = ", ".join(
+                            [pretag, fueltechmap[tech],
+                             veh_size, str(year)])
+                    return {
+                        Activity(
+                            Act.get((Act.name == act_str)
+                                    & (Act.database == db.name))): scale}
+                else:
+                    # these other techs are regionalized
                     act_str = ", ".join(
                             [pretag, fueltechmap[tech],
                              veh_size, str(year)])
@@ -123,14 +132,6 @@ class TransportLCAReporting(LCAReporting):
                             Act.get((Act.name == act_str)
                                     & (Act.database == db.name)
                                     & (Act.location == region))): scale}
-                else:
-                    act_str = ", ".join(
-                            [pretag, fueltechmap[tech],
-                             veh_size, str(year)])
-                    return {
-                        Activity(
-                            Act.get((Act.name == act_str)
-                                    & (Act.database == db.name))): scale}
 
     def report_LDV_LCA(self):
         """
