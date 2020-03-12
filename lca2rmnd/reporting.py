@@ -184,6 +184,83 @@ class TransportLCAReporting(LCAReporting):
         df["total_score"] = df["value"] * df["score_pkm"] * 1e9
         return df[["total_score", "score_pkm"]]
 
+    def _get_material_bioflows_for_bev(self):
+        """
+        Obtain bioflow ids for *interesting* materials.
+        These are the top bioflows in the ILCD materials
+        characterization method for an BEV activity.
+        """
+
+        method = ('ILCD 2.0 2018 midpoint',
+                  'resources', 'minerals and metals')
+        year = self.years[0]
+        act_str = "Passenger car, BEV, Van, {}".format(year)
+
+        # upstream material demands are the same for all regions
+        # so we can use GLO here
+        act = Activity(
+            Act.get((Act.name == act_str)
+                    & (Act.database == eidb_label(self.scenario, year))
+                    & (Act.location == "GLO")))
+        lca = bw.LCA({act: 1}, method=method)
+        lca.lci()
+        lca.lcia()
+
+        inv_bio = {value: key for key, value in lca.biosphere_dict.items()}
+
+        ca = ContributionAnalysis()
+        ef_contrib = ca.top_emissions(lca.characterized_inventory)
+        return [inv_bio[int(el[1])] for el in ef_contrib]
+
+    def report_materials(self):
+        """
+        Report the material demand of the LDV fleet for all regions and years.
+
+        :return: A `pandas.Series` with index `year`, `region` and `material`.
+        """
+        # materials
+        bioflows = self._get_material_bioflows_for_bev()
+        # available variables
+        variables = [
+            var for var in self.data.Variable.unique()
+            if var.startswith("ES|Transport|Pass|Road|LDV")
+            and "Two-Wheelers" not in var]
+        # only high detail entries
+        variables = [var for var in variables if len(var.split("|")) == 7]
+
+        df = self.data[self.data.Variable.isin(variables)]
+
+        df.set_index(["Year", "Region", "Variable"], inplace=True)
+        start = time.time()
+        result = {}
+        # calc score
+        for year in self.years:
+            db = bw.Database(eidb_label(self.scenario, year))
+            for region in df.index.get_level_values(1).unique():
+                # create large lca demand object
+                demand = [
+                    self._act_from_variable(
+                        var, db, year, region,
+                        scale=df.loc[(year, region, var), "value"])
+                    for var in (df.loc[(year, region)]
+                                .index.get_level_values(0)
+                                .unique())]
+                # flatten dictionaries
+                demand = {k: v for item in demand for k, v in item.items()}
+                lca = bw.LCA(demand)
+                # build inventories
+                lca.lci()
+                for code in bioflows:
+                    result[(
+                        year, region,
+                        bw.get_activity(code)["name"].split(",")[0]
+                    )] = (
+                        lca.inventory.sum(axis=1)[
+                            lca.biosphere_dict[code], 0]
+                    )
+        df_result = pd.Series(result)
+        print("Calculation took {} seconds.".format(time.time() - start))
+        return df_result * 1e9  # billion pkm
 
 
 class ElectricityLCAReporting(LCAReporting):
@@ -245,7 +322,7 @@ class ElectricityLCAReporting(LCAReporting):
         result["score_kWh"] = result["total_score"] / (result["total_demand"] * 2.8e11)
 
 
-        return result[["Region", "Year", "method", "total_score", "score_kWh"]]
+        return result[["Year", "Region", "method", "total_score", "score_kWh"]]
 
     def _sum_variables_and_add_scores(self, market, variables):
         """
@@ -262,7 +339,7 @@ class ElectricityLCAReporting(LCAReporting):
         # add methods dimension & score column
         methods_df = pd.DataFrame({"method": self.methods, "market": market})
         df = df.merge(methods_df)
-        df["score"] = 0.
+        df.loc[:, "score"] = 0.
 
         # calc score
         for year in self.years:
@@ -285,11 +362,11 @@ class ElectricityLCAReporting(LCAReporting):
                     lca.lcia()
                     return lca.score
 
-                df_slice["score"] = df_slice.apply(
+                df_slice.loc[:, "score"] = df_slice.apply(
                     lambda row: get_score(row["method"]), axis=1)
                 df.update(df_slice)
 
-        df["total_score"] = df["score"] * df["value"] * 2.8e11 # EJ -> kWh
+        df["total_score"] = df["score"] * df["value"] * 2.8e11  # EJ -> kWh
         return df
 
     def report_tech_LCA(self, year):
