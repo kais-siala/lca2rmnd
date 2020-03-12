@@ -6,10 +6,10 @@ https://github.com/romainsacchi/carculator
 Usage example:
     years = [2015, 2050]
     scenario = "BAU"
-    roject_name = "transport_lca"
+    project_name = "transport_lca"
 
     fpei36 = "ecoinvent/ecoinvent 3.6_cut-off_ecoSpold02/datasets/"
-    create_project(project_name, ecoinvent_path, years, scenario)
+    create_project(project_name, fpei36, years, scenario)
     load_and_merge(scenario, years)
 
     # test
@@ -200,4 +200,4 @@ def load_and_merge(scenario, years, relink=True):
         print("Merge carculator results with ecoinvent.")
         merge_databases(eidb, inv.db_name)
         if relink:
-            relink_electricity_demand(eidb)
+            relink_electricity_demand(bw.Database(eidb))
