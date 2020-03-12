@@ -8,7 +8,8 @@ from rmnd_lca.utils import eidb_label
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 import brightway2 as bw
 import pandas as pd
-from bw2data.backends.peewee.proxies import Activity
+from bw2analyzer import ContributionAnalysis
+
 import time
 
 class LCAReporting():
@@ -77,7 +78,7 @@ class TransportLCAReporting(LCAReporting):
 
     diesel_share = 0.15
 
-    def _act_from_variable(self, variable, db, year):
+    def _act_from_variable(self, variable, db, year, region, scale=1):
         """
         Find the activity for a given REMIND transport reporting variable.
         """
@@ -98,8 +99,10 @@ class TransportLCAReporting(LCAReporting):
 
                 pretag = "Passenger car"
                 if tech == "Liquids":
-                    diesel_str = ", ".join([pretag, "ICEV-d", veh_size, str(year)])
-                    petrol_str = ", ".join([pretag, "ICEV-p", veh_size, str(year)])
+                    diesel_str = ", ".join([
+                        pretag, "ICEV-d", veh_size, str(year)])
+                    petrol_str = ", ".join([
+                        pretag, "ICEV-p", veh_size, str(year)])
                     diesel_act = Activity(
                         Act.get((Act.name == diesel_str)
                                 & (Act.database == db.name)))
@@ -107,9 +110,19 @@ class TransportLCAReporting(LCAReporting):
                         Act.get((Act.name == petrol_str)
                                 & (Act.database == db.name)))
                     return {
-                        diesel_act: self.diesel_share,
-                        petrol_act: 1 - self.diesel_share
+                        diesel_act: scale*(self.diesel_share),
+                        petrol_act: scale*(1 - self.diesel_share)
                     }
+                elif tech in ["BEV", "Hybrid Electric"]:
+                    # these techs are regionalized
+                    act_str = ", ".join(
+                            [pretag, fueltechmap[tech],
+                             veh_size, str(year)])
+                    return {
+                        Activity(
+                            Act.get((Act.name == act_str)
+                                    & (Act.database == db.name)
+                                    & (Act.location == region))): scale}
                 else:
                     act_str = ", ".join(
                             [pretag, fueltechmap[tech],
@@ -117,7 +130,7 @@ class TransportLCAReporting(LCAReporting):
                     return {
                         Activity(
                             Act.get((Act.name == act_str)
-                                    & (Act.database == db.name))): 1}
+                                    & (Act.database == db.name))): scale}
 
     def report_LDV_LCA(self):
         """
@@ -140,7 +153,7 @@ class TransportLCAReporting(LCAReporting):
 
         df = self.data[self.data.Variable.isin(variables)]
 
-        df["score_pkm"] = 0.
+        df.loc[:, "score_pkm"] = 0.
         # add methods dimension & score column
         methods_df = pd.DataFrame({"Method": self.methods, "score_pkm": 0.})
         df = df.merge(methods_df, "outer")  # on "score_pkm"
@@ -152,14 +165,12 @@ class TransportLCAReporting(LCAReporting):
             # find activities which at the moment do not depend
             # on regions
             db = bw.Database(eidb_label(self.scenario, year))
-            act_lookup = {
-                var: self._act_from_variable(var, db, year)
-                for var in variables}
             for region in df.index.get_level_values(1).unique():
                 for var in (df.loc[(year, region)]
                             .index.get_level_values(0)
                             .unique()):
-                    lca = bw.LCA(act_lookup[var],
+                    demand = self._act_from_variable(var, db, year, region)
+                    lca = bw.LCA(demand,
                                  method=self.methods[0])
                     # build inventories
                     lca.lci()
@@ -171,9 +182,8 @@ class TransportLCAReporting(LCAReporting):
                                "score_pkm"] = lca.score
         print("Calculation took {} seconds.".format(time.time() - start))
         df["total_score"] = df["value"] * df["score_pkm"] * 1e9
-        df.reset_index(inplace=True)
-        return df[["Region", "Year", "Variable", "Method",
-                   "total_score", "score_pkm"]]
+        return df[["total_score", "score_pkm"]]
+
 
 
 class ElectricityLCAReporting(LCAReporting):
