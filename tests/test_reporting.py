@@ -1,10 +1,10 @@
-import pytest
+
 import pandas as pd
 import random
 import brightway2 as bw
 import math
 
-from lca2rmnd.reporting import ElectricityLCAReporting
+from lca2rmnd.reporting import ElectricityLCAReporting, TransportLCAReporting
 from rmnd_lca import InventorySet
 from rmnd_lca.utils import eidb_label
 
@@ -16,18 +16,19 @@ remind_regions = [
 # activate the correct brightway2 project
 bw.projects.set_current("transport_lca")
 
-years = [2015, 2050]
+years = [2050]
 scenario = "BAU"
-rep = ElectricityLCAReporting(scenario, years)
 
 
 def test_electricity_sectoral_reporting():
+    rep = ElectricityLCAReporting(scenario, years)
     res = rep.report_sectoral_LCA()
     assert isinstance(res, pd.DataFrame)
     assert len(res)
 
 
 def test_electricity_supplier_shares_random():
+    rep = ElectricityLCAReporting(scenario, years)
     yr = random.choice(years)
     region = random.choice(remind_regions)
 
@@ -43,6 +44,7 @@ def test_electricity_supplier_shares_random():
 
 
 def test_electricity_tech_reporting():
+    rep = ElectricityLCAReporting(scenario, years)
     yr = random.choice(years)
     region = random.choice(remind_regions)
 
@@ -54,3 +56,39 @@ def test_electricity_tech_reporting():
 
     assert len(test) > 0
     assert len(test.loc[(region, tech)]) > 0
+
+
+def test_ldv_tech_reporting():
+    rep = TransportLCAReporting(scenario, years)
+    test = rep.report_LDV_LCA()
+
+    assert len(test) > 0
+    yr = random.choice(years)
+    region = random.choice(remind_regions)
+    assert len(test.loc[(yr, region)]) > 0
+
+    variables = [
+        var for var in rep.data.Variable.unique()
+        if var.startswith("ES|Transport|Pass|Road|LDV")
+        and "Two-Wheelers" not in var]
+    # only high detail entries
+    variables = [var for var in variables if len(var.split("|")) == 7]
+    assert len(variables) > 0
+
+    var = random.choice(variables)
+    assert len(test.loc[(yr, region, var)]) > 0
+
+    met = random.choice(rep.methods)
+    assert test.at[(yr, region, var, met), "score_pkm"] > 0
+
+
+def test_ldv_material_reporting():
+    rep = TransportLCAReporting(scenario, years)
+    test = rep.report_materials()
+
+    assert len(test) > 0
+    yr = random.choice(years)
+    region = random.choice(remind_regions)
+    assert len(test.loc[(yr, region)]) > 0
+
+    assert test.loc[(yr, region, "Gold")] > 0
