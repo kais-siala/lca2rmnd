@@ -12,6 +12,7 @@ from bw2analyzer import ContributionAnalysis
 
 import time
 
+
 class LCAReporting():
     """
     The base class for LCA Reports for REMIND output.
@@ -61,7 +62,8 @@ class TransportLCAReporting(LCAReporting):
 
     The class assumes that the current brightway project contains
     all the relevant databases, including the characterization methods.
-    Note that the convention for database names is "ecoinvent_<scenario>_<year>".
+    Note that the convention for database names is
+    "ecoinvent_<scenario>_<year>".
 
     :ivar scenario: name of the REMIND scenario, e.g., 'BAU', 'SCP26'.
     :vartype scenario: str
@@ -89,25 +91,47 @@ class TransportLCAReporting(LCAReporting):
                 fueltechmap = {
                     "BEV": "BEV",
                     "Gases": "ICEV-g",
-                    "Liquids": ["ICEV-d", "ICEV-p"],
+                    "Liquids": {"diesel": "ICEV-d",
+                                "petrol": "ICEV-p"},
                     "FCEV": "FCEV",
-                    "Hybrid Electric": "PHEV",
-                    "Hybrid Liquids": "HEV-p"
+                    "Hybrid Electric": {"diesel": "PHEV-d",
+                                        "petrol": "PHEV-p"},
+                    "Hybrid Liquids": {"diesel": "HEV-d",
+                                       "petrol": "HEV-p"}
                 }
                 veh_size = varsp.pop(0)
                 tech = varsp.pop(0)
 
                 pretag = "Passenger car"
-                if tech == "Liquids":
+                if tech in ["Hybrid Liquids", "Liquids"]:
+                    fueltechs = fueltechmap[tech]
                     diesel_str = ", ".join([
-                        pretag, "ICEV-d", veh_size, str(year)])
+                        pretag, fueltechs["diesel"], veh_size, str(year)])
                     petrol_str = ", ".join([
-                        pretag, "ICEV-p", veh_size, str(year)])
+                        pretag, fueltechs["petrol"], veh_size, str(year)])
                     diesel_act = Activity(
                         Act.get((Act.name == diesel_str)
                                 & (Act.database == db.name)))
                     petrol_act = Activity(
                         Act.get((Act.name == petrol_str)
+                                & (Act.database == db.name)))
+                    return {
+                        diesel_act: scale*(self.diesel_share),
+                        petrol_act: scale*(1 - self.diesel_share)
+                    }
+                if tech == "Hybrid Electric":
+                    # similar to Liquids, but regionlized due to el. markets
+                    fueltechs = fueltechmap[tech]
+                    diesel_str = ", ".join([
+                        pretag, fueltechs["diesel"], veh_size, str(year)])
+                    petrol_str = ", ".join([
+                        pretag, fueltechs["petrol"], veh_size, str(year)])
+                    diesel_act = Activity(
+                        Act.get((Act.name == diesel_str)
+                                & (Act.database == db.name)))
+                    petrol_act = Activity(
+                        Act.get((Act.name == petrol_str)
+                                & (Act.location == region)
                                 & (Act.database == db.name)))
                     return {
                         diesel_act: scale*(self.diesel_share),

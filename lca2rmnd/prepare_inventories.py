@@ -105,72 +105,78 @@ def load_car_activities(year_range):
     return ic.export_lci_to_bw(ecoinvent_compatibility=False)[0]
 
 
-def relink_electricity_demand(eidb):
+def relink_electricity_demand(scenario, year):
     """Create LDV activities for REMIND regions and relink
-    existing electricity exchanges for BEVs, FCEVs, HEVs and PHEVs
+    existing electricity exchanges for BEVs, FCEVs and PHEVs
     to REMIND-compatible (regional) market groups.
 
-    :param eidb: a brightway2 `Database`. This database is
-        modified in place.
+    :param eidb: REMIND scenario.
+    :param year: REMIND year.
 
     """
+    eidb = bw.Database(rmnd_lca.utils.eidb_label(scenario, year))
     remind_regions = [
         'LAM', 'OAS', 'SSA', 'EUR',
         'NEU', 'MEA', 'REF', 'CAZ',
         'CHA', 'IND', 'JPN', 'USA']
-    # find BEVs (rexexp function in peewee seems to be broken)
-    bevs = [Activity(sel) for sel in Act.select().where(
-        (Act.name.contains("BEV,")
-         | Act.name.contains("PHEV,")
-         | Act.name.contains("FCEV,")
-         | Act.name.contains("HEV-"))
-        & (Act.database == eidb.name))]
 
+    def find_evs():
+        # find EVs (rexexp function in peewee seems to be broken)
+        return [Activity(sel) for sel in Act.select().where(
+            (Act.name.contains("EV,")
+             | Act.name.contains("PHEV-"))  # PHEV-d and PHEV-p
+            & (Act.database == eidb.name))]
+
+    bevs = find_evs()
     # any non-global activities found?
     non_glo = [act for act in bevs if act["location"] != "GLO"]
     if non_glo:
-        print(("Database is most likely already updated."
-               "Deleting existing non-GLO activities."))
-        for act in non_glo:
-            act.delete()
-
-    market_types = ["low", "medium", "high"]
+        print(("Found non-global EV activities: {}"
+               "DB is most likely already updated.").format(non_glo))
+        ans = input("Delete existing non-GLO activities? (y/n)")
+        if ans == "y":
+            for act in non_glo:
+                act.delete()
+            bevs = find_evs()
+        else:
+            return
 
     for region in remind_regions:
+        print("Relinking markets for {}".format(region))
         # find markets
-        markets = {mtype: [
-            a for a in eidb
-            if a["name"].startswith(
-                    "market group for electricity, {} voltage".format(mtype))
-            and a["location"] == region][0]
-                   for mtype in market_types}
+        new_market = Activity(Act.get(
+            Act.name.startswith("market group for electricity, low voltage")
+            & (Act.location == region)
+            & (Act.database == eidb.name)))
+        old_market_name = ("electricity market for fuel preparation, {}"
+                           .format(year))
         for bev in bevs:
             new_bev = bev.copy()
             new_bev["location"] = region
             new_bev.save()
-            for mtype in market_types:
-                refprod = "electricity, {} voltage".format(mtype)
-                exchanges = [
-                    ex for ex in new_bev.technosphere()
-                    if ex["reference product"] == refprod]
-                # delete old exchanges
-                demand = sum([ex["amount"] for ex in exchanges])
-                if demand > 0:
-                    for ex in exchanges:
-                        ex.delete()
 
-                    # new exchange
-                    exc = new_bev.new_exchange(**{
-                        "name": markets[mtype]["name"],
-                        "amount": demand,
-                        "unit": "kilowatt hour",
-                        "type": "technosphere",
-                        "location": region,
-                        "uncertainty type": 1,
-                        "reference product": refprod,
-                        "input": markets[mtype].key
-                    })
-                    exc.save()
+            exchanges = [
+                ex for ex in new_bev.technosphere()
+                if ex["name"] == old_market_name]
+            # should only be one
+            if len(exchanges) > 1:
+                raise ValueError("More than one electricity market for "
+                                 "fuel production found for {}"
+                                 .format(new_bev))
+            elif len(exchanges) == 1:
+                # new exchange
+                new_bev.new_exchange(**{
+                    "name": new_market["name"],
+                    "amount": exchanges[0]["amount"],
+                    "unit": "kilowatt hour",
+                    "type": "technosphere",
+                    "location": region,
+                    "uncertainty type": 1,
+                    "reference product": "electricity, low voltage",
+                    "input": new_market.key
+                }).save()
+
+                exchanges[0].delete()
 
 
 def load_and_merge(scenario, years, relink=True):
@@ -184,7 +190,7 @@ def load_and_merge(scenario, years, relink=True):
         from market groups in REMIND regions
     """
     for year in years:
-        eidb = "_".join(["ecoinvent", scenario, str(year)])
+        eidb = rmnd_lca.utils.eidb_label(scenario, year)
         inv = load_car_activities(np.array([year]))
         inv.apply_strategies()
 
@@ -205,4 +211,4 @@ def load_and_merge(scenario, years, relink=True):
         print("Merge carculator results with ecoinvent.")
         merge_databases(eidb, inv.db_name)
         if relink:
-            relink_electricity_demand(bw.Database(eidb))
+            relink_electricity_demand(scenario, year)
