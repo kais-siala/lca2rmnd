@@ -287,6 +287,56 @@ class TransportLCAReporting(LCAReporting):
         print("Calculation took {} seconds.".format(time.time() - start))
         return df_result * 1e9  # billion pkm
 
+    def report_endpoint(self):
+        """
+        Report the surplus extraction costs for the scenario.
+
+        :return: A `pandas.Series` containing extraction costs
+          with index `year` and `region`.
+        """
+        endpoint_method = ('ReCiPe Endpoint (H,A) (obsolete)', 'resources', 'metal depletion')
+
+        # available variables
+        variables = [
+            var for var in self.data.Variable.unique()
+            if var.startswith("ES|Transport|Pass|Road|LDV")
+            and "Two-Wheelers" not in var]
+        # only high detail entries
+        variables = [var for var in variables if len(var.split("|")) == 7]
+
+        df = self.data[self.data.Variable.isin(variables)]
+
+        df.set_index(["Year", "Region", "Variable"], inplace=True)
+        start = time.time()
+        result = {}
+        # calc score
+        for year in self.years:
+            db = bw.Database(eidb_label(self.scenario, year))
+            for region in df.index.get_level_values(1).unique():
+                # create large lca demand object
+                demand = [
+                    self._act_from_variable(
+                        var, db, year, region,
+                        scale=df.loc[(year, region, var), "value"])
+                    for var in (df.loc[(year, region)]
+                                .index.get_level_values(0)
+                                .unique())]
+                # flatten dictionaries
+                demand = {k: v for item in demand for k, v in item.items()}
+                lca = bw.LCA(demand, method=endpoint_method)
+                # build inventories
+                lca.lci()
+                lca.lcia()
+
+                result[(
+                    year, region
+                )] = lca.score * 1e9 * 1.06 ** (year - 2013) # 6% discount
+
+        df_result = pd.Series(result)
+        print("Calculation took {} seconds.".format(time.time() - start))
+        return df_result # billion pkm
+
+
 
 class ElectricityLCAReporting(LCAReporting):
     """

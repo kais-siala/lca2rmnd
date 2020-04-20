@@ -92,3 +92,13 @@ def test_ldv_material_reporting():
     assert len(test.loc[(yr, region)]) > 0
 
     assert test.loc[(yr, region, "Gold")] > 0
+
+def test_ldv_endpoint_reporting():
+    rep = TransportLCAReporting(scenario, years)
+    test = rep.report_endpoint()
+
+    assert len(test) > 0
+    yr = random.choice(years)
+    region = random.choice(remind_regions)
+
+    assert test.loc[(yr, region)] > 0
