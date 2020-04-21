@@ -1,5 +1,6 @@
 from . import DATA_DIR
 
+import os
 import pandas as pd
 import xarray as xr
 import numpy as np
@@ -14,10 +15,10 @@ class RemindDataCollection():
         filename = self.scenario + ".mif"
         filepath_remind_files = (filepath_remind_files or DATA_DIR / "remind" )
 
-        fls = glob(str(filepath_remind_files) + "/" + scenario + "_*.mif")
+        fname = filepath_remind_files / "{}.mif".format(scenario)
 
-        if len(fls) > 0:
-            self.rmndpath = fls[0]
+        if os.path.exists(fname):
+            self.rmndpath = fname
         else:
             raise FileNotFoundError("No scenario output file found for scenario " + scenario)
         self.data = self.get_remind_data()
@@ -45,9 +46,3 @@ class RemindDataCollection():
         return df
 
 
-    def filter_electricity_production():
-
-        df = df.loc[
-            (df.index.get_level_values("Variable").str.contains("SE"))
-            | (df.index.get_level_values("Variable").str.contains("Tech"))
-        ]

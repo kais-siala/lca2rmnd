@@ -9,7 +9,7 @@ Usage example:
     project_name = "transport_lca"
 
     fpei36 = "ecoinvent/ecoinvent 3.6_cut-off_ecoSpold02/datasets/"
-    create_project(project_name, fpei36, years, scenario)
+    create_project(project_name, fpei36, years, scenario, "data/remind/")
     load_and_merge(scenario, years)
 
     # test
@@ -31,7 +31,7 @@ import numpy as np
 
 
 def create_project(project_name, ecoinvent_path,
-                   years, scenario="BAU"):
+                   years, scenario, remind_data_path):
     """
     Create and prepare a brightway2 project with updated
     inventories for electricity markets according to
@@ -74,7 +74,8 @@ def create_project(project_name, ecoinvent_path,
             scenario=scenario,
             year=year,
             source_db='ecoinvent 3.6 cutoff',
-            source_version=3.6)
+            source_version=3.6,
+            filepath_remind_files=remind_data_path)
         ndb.update_electricity_to_remind_data()
         ndb.write_db_to_brightway()
 
