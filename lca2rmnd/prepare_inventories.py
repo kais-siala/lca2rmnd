@@ -31,7 +31,7 @@ import numpy as np
 
 
 def create_project(project_name, ecoinvent_path,
-                   years, scenario, remind_data_path):
+                   years, scenario, remind_data_path, from_scratch=True):
     """
     Create and prepare a brightway2 project with updated
     inventories for electricity markets according to
@@ -45,17 +45,19 @@ def create_project(project_name, ecoinvent_path,
         this has to be ecoinvent version 3.6
     :param list years: range of years to create inventories for
     :param str scenario: the scenario to create inventories for
+    :param bool from_scratch: should all databases be deleted and recreated?
 
     """
     bw.projects.set_current(project_name)
 
-    print("Clean existing databases.")
-    dbstr = list(bw.databases)
-    for db in dbstr:
-        del(bw.databases[db])
-    bw.methods.clear()
+    if(from_scratch):
+        print("Clean existing databases.")
+        dbstr = list(bw.databases)
+        for db in dbstr:
+            del(bw.databases[db])
+            bw.methods.clear()
 
-    bw.bw2setup()
+        bw.bw2setup()
 
     print("Import Ecoinvent.")
     if 'ecoinvent 3.6 cutoff' in bw.databases:
@@ -75,8 +77,8 @@ def create_project(project_name, ecoinvent_path,
             year=year,
             source_db='ecoinvent 3.6 cutoff',
             source_version=3.6,
-            filepath_remind_files=remind_data_path)
-        ndb.update_electricity_to_remind_data()
+            filepath_to_remind_files=remind_data_path)
+        ndb.update_all()
         ndb.write_db_to_brightway()
 
 
