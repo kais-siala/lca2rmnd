@@ -33,7 +33,8 @@ class LCAReporting():
     :vartype source_db: str
     """
     def __init__(self, scenario, years,
-                 indicatorgroup='ReCiPe Midpoint (H) V1.13'):
+                 indicatorgroup='ReCiPe Midpoint (H) V1.13',
+                 remind_output_folder):
         self.years = years
         self.scenario = scenario
         self.selector = ActivitySelector()
@@ -51,7 +52,7 @@ class LCAReporting():
             raise ValueError(
                 "The following brightway2 databases are missing: {}"
                 .format(missing))
-        rdc = RemindDataCollection(self.scenario)
+        rdc = RemindDataCollection(self.scenario, remind_output_folder)
         self.data = rdc.data[rdc.data.Year.isin(self.years)]
         self.geo = Geomap()
 
