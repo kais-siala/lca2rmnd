@@ -32,9 +32,8 @@ class LCAReporting():
         calculate the scores for, defaults to ReCiPe Midpoint (H)
     :vartype source_db: str
     """
-    def __init__(self, scenario, years,
-                 indicatorgroup='ReCiPe Midpoint (H) V1.13',
-                 remind_output_folder):
+    def __init__(self, scenario, years, remind_output_folder,
+                 indicatorgroup='ReCiPe Midpoint (H) V1.13'):
         self.years = years
         self.scenario = scenario
         self.selector = ActivitySelector()
@@ -85,6 +84,11 @@ class TransportLCAReporting(LCAReporting):
         """
         Find the activity for a given REMIND transport reporting variable.
         """
+        def get_actstr(fuel, size):
+            pretag = "Passenger car"
+            return ", ".join([
+                pretag, fuel, size, str(year), "EURO-6"])
+
         # discard "ES|Transport"
         varsp = variable.split("|")[2:]
         if varsp.pop(0) == "Pass" and varsp.pop(0) == "Road":
@@ -103,30 +107,11 @@ class TransportLCAReporting(LCAReporting):
                 veh_size = varsp.pop(0)
                 tech = varsp.pop(0)
 
-                pretag = "Passenger car"
-                if tech in ["Hybrid Liquids", "Liquids"]:
-                    fueltechs = fueltechmap[tech]
-                    diesel_str = ", ".join([
-                        pretag, fueltechs["diesel"], veh_size, str(year)])
-                    petrol_str = ", ".join([
-                        pretag, fueltechs["petrol"], veh_size, str(year)])
-                    diesel_act = Activity(
-                        Act.get((Act.name == diesel_str)
-                                & (Act.database == db.name)))
-                    petrol_act = Activity(
-                        Act.get((Act.name == petrol_str)
-                                & (Act.database == db.name)))
-                    return {
-                        diesel_act: scale*(self.diesel_share),
-                        petrol_act: scale*(1 - self.diesel_share)
-                    }
-                if tech == "Hybrid Electric":
+                if tech in ["Hybrid Liquids", "Liquids", "Hybrid Electric"]:
                     # similar to Liquids, but regionlized due to el. markets
                     fueltechs = fueltechmap[tech]
-                    diesel_str = ", ".join([
-                        pretag, fueltechs["diesel"], veh_size, str(year)])
-                    petrol_str = ", ".join([
-                        pretag, fueltechs["petrol"], veh_size, str(year)])
+                    diesel_str = get_actstr(fueltechs["diesel"], veh_size)
+                    petrol_str = get_actstr(fueltechs["petrol"], veh_size)
                     diesel_act = Activity(
                         Act.get((Act.name == diesel_str)
                                 & (Act.database == db.name)))
@@ -140,18 +125,14 @@ class TransportLCAReporting(LCAReporting):
                     }
                 elif tech == "Gases":
                     # only global activities exist
-                    act_str = ", ".join(
-                            [pretag, fueltechmap[tech],
-                             veh_size, str(year)])
+                    act_str = get_actstr(fueltechmap[tech], veh_size)
                     return {
                         Activity(
                             Act.get((Act.name == act_str)
                                     & (Act.database == db.name))): scale}
                 else:
                     # these other techs are regionalized
-                    act_str = ", ".join(
-                            [pretag, fueltechmap[tech],
-                             veh_size, str(year)])
+                    act_str = get_actstr(fueltechmap[tech], veh_size)
                     return {
                         Activity(
                             Act.get((Act.name == act_str)
@@ -220,14 +201,14 @@ class TransportLCAReporting(LCAReporting):
         method = ('ILCD 2.0 2018 midpoint',
                   'resources', 'minerals and metals')
         year = self.years[0]
-        act_str = "Passenger car, BEV, Van, {}".format(year)
+        act_str = "Passenger car, BEV, Van, {}, EURO-6".format(year)
 
         # upstream material demands are the same for all regions
         # so we can use GLO here
         act = Activity(
             Act.get((Act.name == act_str)
                     & (Act.database == eidb_label(self.scenario, year))
-                    & (Act.location == "GLO")))
+                    & (Act.location == "RER")))
         lca = bw.LCA({act: 1}, method=method)
         lca.lci()
         lca.lcia()
@@ -295,8 +276,10 @@ class TransportLCAReporting(LCAReporting):
         :return: A `pandas.Series` containing extraction costs
           with index `year` and `region`.
         """
-        endpoint_method = ('ReCiPe Endpoint (H,A) (obsolete)', 'resources', 'metal depletion')
-
+        indicatorgroup = 'ReCiPe Endpoint (H,A) (obsolete)'
+        endpoint_methods = [m for m in bw.methods if m[0] == indicatorgroup
+                   and m[2] == "total"
+                   and not m[1] == "total"]
         # available variables
         variables = [
             var for var in self.data.Variable.unique()
@@ -324,14 +307,18 @@ class TransportLCAReporting(LCAReporting):
                                 .unique())]
                 # flatten dictionaries
                 demand = {k: v for item in demand for k, v in item.items()}
-                lca = bw.LCA(demand, method=endpoint_method)
+                lca = bw.LCA(demand, method=endpoint_methods[0])
                 # build inventories
                 lca.lci()
-                lca.lcia()
-
-                result[(
-                    year, region
-                )] = lca.score * 1e9 * 1.06 ** (year - 2013) # 6% discount
+                for method in endpoint_methods:
+                    lca.switch_method(method)
+                    lca.lcia()
+                    # 6% discount for monetary endpoint
+                    factor = 1e9 * 1.06 ** (year - 2013) \
+                             if "resources" == method[1] else 1e9
+                    result[(
+                        year, region, method
+                    )] = lca.score * factor
 
         df_result = pd.Series(result)
         print("Calculation took {} seconds.".format(time.time() - start))

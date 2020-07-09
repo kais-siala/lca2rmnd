@@ -37,7 +37,9 @@ class RemindDataCollection():
 
         df = pd.read_csv(
             self.rmndpath, sep=";", index_col=["Region", "Variable", "Unit"]
-        ).drop(columns=["Model", "Scenario", "Unnamed: 24"])
+        ).drop(columns=["Model", "Scenario"])
+        if(len(df.columns == 20)):
+            df.drop(columns=df.columns[-1], inplace=True)
         df.columns = df.columns.astype(int)
 
         df.reset_index(inplace=True)
