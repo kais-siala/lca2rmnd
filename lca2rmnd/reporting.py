@@ -1,8 +1,9 @@
 from . import DATA_DIR
 from .data_collection import RemindDataCollection
 from .activity_select import ActivitySelector
+from .utils import project_string
 
-from rmnd_lca import Electricity, Geomap, InventorySet
+from rmnd_lca import Geomap, InventorySet
 from rmnd_lca.utils import eidb_label
 
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
@@ -36,6 +37,7 @@ class LCAReporting():
                  indicatorgroup='ReCiPe Midpoint (H) V1.13'):
         self.years = years
         self.scenario = scenario
+        bw.projects.set_current(project_string(scenario))
         self.selector = ActivitySelector()
         self.methods = [m for m in bw.methods if m[0] == indicatorgroup]
         if not self.methods:
