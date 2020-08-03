@@ -54,7 +54,8 @@ class LCAReporting():
                 "The following brightway2 databases are missing: {}"
                 .format(missing))
         rdc = RemindDataCollection(self.scenario, remind_output_folder)
-        self.data = rdc.data[rdc.data.Year.isin(self.years)]
+        self.data = rdc.data[rdc.data.Year.isin(self.years) &
+                             (rdc.data.Region != "World")]
         self.geo = Geomap()
 
 
