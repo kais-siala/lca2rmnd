@@ -92,8 +92,8 @@ class TransportLCAReporting(LCAReporting):
             return ", ".join([
                 pretag, fuel, size, str(year), "EURO-6"])
 
-        # discard "ES|Transport"
-        varsp = variable.split("|")[2:]
+        # discard "ES|Transport|VKM"
+        varsp = variable.split("|")[3:]
         if varsp.pop(0) == "Pass" and varsp.pop(0) == "Road":
             if varsp.pop(0) == "LDV" and len(varsp) == 2:
                 fueltechmap = {
@@ -156,7 +156,7 @@ class TransportLCAReporting(LCAReporting):
         # available variables
         variables = [
             var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|Pass|Road|LDV")
+            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
             and "Two-Wheelers" not in var]
         # only high detail entries
         variables = [var for var in variables if len(var.split("|")) == 7]
@@ -233,7 +233,7 @@ class TransportLCAReporting(LCAReporting):
         # available variables
         variables = [
             var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|Pass|Road|LDV")
+            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
             and "Two-Wheelers" not in var]
         # only high detail entries
         variables = [var for var in variables if len(var.split("|")) == 7]
@@ -286,7 +286,7 @@ class TransportLCAReporting(LCAReporting):
         # available variables
         variables = [
             var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|Pass|Road|LDV")
+            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
             and "Two-Wheelers" not in var]
         # only high detail entries
         variables = [var for var in variables if len(var.split("|")) == 7]
