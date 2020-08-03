@@ -117,6 +117,7 @@ class TransportLCAReporting(LCAReporting):
                     petrol_str = get_actstr(fueltechs["petrol"], veh_size)
                     diesel_act = Activity(
                         Act.get((Act.name == diesel_str)
+                                & (Act.location == region)
                                 & (Act.database == db.name)))
                     petrol_act = Activity(
                         Act.get((Act.name == petrol_str)
