@@ -160,7 +160,7 @@ class TransportLCAReporting(LCAReporting):
             if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
             and "Two-Wheelers" not in var]
         # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 7]
+        variables = [var for var in variables if len(var.split("|")) == 8]
 
         df = self.data[self.data.Variable.isin(variables)]
 
@@ -237,7 +237,7 @@ class TransportLCAReporting(LCAReporting):
             if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
             and "Two-Wheelers" not in var]
         # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 7]
+        variables = [var for var in variables if len(var.split("|")) == 8]
 
         df = self.data[self.data.Variable.isin(variables)]
 
@@ -271,7 +271,7 @@ class TransportLCAReporting(LCAReporting):
                     )
         df_result = pd.Series(result)
         print("Calculation took {} seconds.".format(time.time() - start))
-        return df_result * 1e9  # billion pkm
+        return df_result * 1e9  # kg
 
     def report_endpoint(self):
         """
@@ -290,7 +290,7 @@ class TransportLCAReporting(LCAReporting):
             if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
             and "Two-Wheelers" not in var]
         # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 7]
+        variables = [var for var in variables if len(var.split("|")) == 8]
 
         df = self.data[self.data.Variable.isin(variables)]
 
@@ -341,7 +341,7 @@ class TransportLCAReporting(LCAReporting):
             if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
             and "Two-Wheelers" not in var]
         # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 7]
+        variables = [var for var in variables if len(var.split("|")) == 8]
 
         df = self.data[self.data.Variable.isin(variables)]
 
