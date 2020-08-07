@@ -377,7 +377,57 @@ class TransportLCAReporting(LCAReporting):
         print("Calculation took {} seconds.".format(time.time() - start))
         return df_result # billion pkm
 
+    def report_midpoint_to_endpoint(self):
+        """
+        Report midpoint impacts for the full fleet for each scenario.
 
+        :return: A `pandas.Series` containing impacts
+          with index `year`,`region` and `method`.
+        """
+        # available variables
+        variables = [
+            var for var in self.data.Variable.unique()
+            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
+            and "Two-Wheelers" not in var]
+        # only high detail entries
+        variables = [var for var in variables if len(var.split("|")) == 8]
+        methods = [m for m in bw.methods
+                   if m[0] == "ReCiPe Endpoint (H,A) (obsolete)"
+                   and m[2] != "total"]
+
+        df = self.data[self.data.Variable.isin(variables)]
+
+        df.set_index(["Year", "Region", "Variable"], inplace=True)
+        start = time.time()
+        result = {}
+        # calc score
+        for year in self.years:
+            db = bw.Database(eidb_label(self.scenario, year))
+            for region in df.index.get_level_values(1).unique():
+                # create large lca demand object
+                demand = [
+                    self._act_from_variable(
+                        var, db, year, region,
+                        scale=df.loc[(year, region, var), "value"])
+                    for var in (df.loc[(year, region)]
+                                .index.get_level_values(0)
+                                .unique())]
+                # flatten dictionaries
+                demand = {k: v for item in demand for k, v in item.items()}
+                lca = bw.LCA(demand, method=self.methods[0])
+                # build inventories
+                lca.lci()
+                for method in methods:
+                    lca.switch_method(method)
+                    lca.lcia()
+                    factor = 1e9
+                    result[(
+                        year, region, method
+                    )] = lca.score * factor
+
+        df_result = pd.Series(result)
+        print("Calculation took {} seconds.".format(time.time() - start))
+        return df_result # billion pkm
 
 class ElectricityLCAReporting(LCAReporting):
     """
