@@ -39,7 +39,9 @@ class LCAReporting():
         self.scenario = scenario
         bw.projects.set_current(project_string(scenario))
         self.selector = ActivitySelector()
-        self.methods = [m for m in bw.methods if m[0] == indicatorgroup]
+        self.methods = [m for m in bw.methods if m[0] == indicatorgroup
+                        and m[1] != "climate change"]
+        self.methods.append(('IPCC 2013', 'climate change', 'GWP 100a'))
         if not self.methods:
             raise ValueError(("No methods found in the current brightway2"
                               " project for the following group: {}.")
@@ -202,7 +204,7 @@ class TransportLCAReporting(LCAReporting):
         characterization method for an BEV activity.
         """
 
-        method = ('ILCD 2.0 2018 midpoint',
+        methods = ('ILCD 2.0 2018 midpoint',
                   'resources', 'minerals and metals')
         year = self.years[0]
         act_str = "Passenger car, BEV, Van, {}, EURO-6".format(year)
@@ -211,7 +213,8 @@ class TransportLCAReporting(LCAReporting):
         # so we can use GLO here
         act = Activity(
             Act.get((Act.name == act_str)
-                    & (Act.database == eidb_label(self.scenario, year))
+                    & (Act.database == eidb_label(
+                        self.scenario, year))
                     & (Act.location == "RER")))
         lca = bw.LCA({act: 1}, method=method)
         lca.lci()
@@ -269,6 +272,46 @@ class TransportLCAReporting(LCAReporting):
                         lca.inventory.sum(axis=1)[
                             lca.biosphere_dict[code], 0]
                     )
+        df_result = pd.Series(result)
+        print("Calculation took {} seconds.".format(time.time() - start))
+        return df_result * 1e9  # kg
+
+    def report_direct_emissions(self):
+        """
+        Report the direct (exhaust) emissions of the LDV fleet.
+        """
+        variables = [
+            var for var in self.data.Variable.unique()
+            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
+            and "Two-Wheelers" not in var]
+        # only high detail entries
+        variables = [var for var in variables if len(var.split("|")) == 8]
+
+        df = self.data[self.data.Variable.isin(variables)]
+
+        df.set_index(["Year", "Region", "Variable"], inplace=True)
+        start = time.time()
+        result = {}
+        # calc score
+        for year in self.years:
+            db = bw.Database(eidb_label(self.scenario, year))
+            for region in df.index.get_level_values(1).unique():
+                # create large lca demand object
+                demand = [
+                    self._act_from_variable(
+                        var, db, year, region,
+                        scale=df.loc[(year, region, var), "value"])
+                    for var in (df.loc[(year, region)]
+                                .index.get_level_values(0)
+                                .unique())]
+                # flatten dictionaries
+                demand = {k: v for item in demand for k, v in item.items()}
+                for act in demand:
+                    for ex in act.biosphere():
+                        result[(year, region, ex["name"])] = (
+                            result.get((year, region, ex["name"]), 0)
+                            + ex["amount"] * demand[act])
+
         df_result = pd.Series(result)
         print("Calculation took {} seconds.".format(time.time() - start))
         return df_result * 1e9  # kg
