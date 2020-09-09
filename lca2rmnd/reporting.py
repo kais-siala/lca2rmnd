@@ -83,7 +83,8 @@ class TransportLCAReporting(LCAReporting):
 
     """
 
-    diesel_share = 0.15
+    # European diesel share
+    diesel_share = 0.45
 
     def _act_from_variable(self, variable, db, year, region, scale=1):
         """
@@ -93,6 +94,24 @@ class TransportLCAReporting(LCAReporting):
             pretag = "Passenger car"
             return ", ".join([
                 pretag, fuel, size, str(year), "EURO-6"])
+        def get_old_eurox_act(region, fuel, size, eurox):
+            if region == "EUR":
+                ei_loc = "RER"
+            else:
+                ei_loc = "RoW"
+            rough_size = "medium"
+            if size in ["Two-Wheelers", "Mini", "Small"]:
+                rough_size = "small"
+            elif size in ["SUV", "Van"]:
+                rough_size = "large"
+            actstr = ", ".join([
+                "transport, passenger car",
+                "{} size".format(rough_size),
+                fuel, "EURO {}".format(eurox)])
+            return Activity(
+                Act.get((Act.name == actstr)
+                        & (Act.location == ei_loc)
+                        & (Act.database == db.name)))
 
         # discard "ES|Transport|VKM"
         varsp = variable.split("|")[3:]
@@ -112,7 +131,52 @@ class TransportLCAReporting(LCAReporting):
                 veh_size = varsp.pop(0)
                 tech = varsp.pop(0)
 
-                if tech in ["Hybrid Liquids", "Liquids", "Hybrid Electric"]:
+                if tech == "Liquids":
+                    euro6share = max(0.25, min(1, 0.075*(year - 2020) + 0.25))
+                    diesel_str = get_actstr("ICEV-d", veh_size)
+                    petrol_str = get_actstr("ICEV-p", veh_size)
+                    if year >= 2030:
+                        # only EURO 6 from 2030 on
+                        cars = {
+                            Activity(
+                                Act.get((Act.name == diesel_str)
+                                        & (Act.location == region)
+                                        & (Act.database == db.name))):
+                            scale * self.diesel_share,
+                            Activity(
+                                Act.get((Act.name == petrol_str)
+                                        & (Act.location == region)
+                                        & (Act.database == db.name))):
+                            scale * (1-self.diesel_share)
+                        }
+                    else:
+                        cars = {
+                            # EURO 3-5
+                            **{
+                                get_old_eurox_act(region, "diesel", veh_size, x):
+                                (1-euro6share) * scale * self.diesel_share / 3
+                                for x in range(3, 6)
+                            },
+                            **{
+                                get_old_eurox_act(region, "petrol", veh_size, x):
+                                (1-euro6share) * scale * (1-self.diesel_share) / 3
+                                for x in range(3, 6)
+                            },
+                            # EURO 6
+                            Activity(
+                                Act.get((Act.name == diesel_str)
+                                        & (Act.location == region)
+                                        & (Act.database == db.name))):
+                            euro6share * scale * self.diesel_share,
+                            Activity(
+                                Act.get((Act.name == petrol_str)
+                                        & (Act.location == region)
+                                        & (Act.database == db.name))):
+                            euro6share * scale * (1-self.diesel_share)
+                        }
+                    return cars
+
+                if tech in ["Hybrid Liquids", "Hybrid Electric"]:
                     # similar to Liquids, but regionlized due to el. markets
                     fueltechs = fueltechmap[tech]
                     diesel_str = get_actstr(fueltechs["diesel"], veh_size)
