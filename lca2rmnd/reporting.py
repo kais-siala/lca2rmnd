@@ -93,7 +93,7 @@ class TransportLCAReporting(LCAReporting):
         def get_actstr(fuel, size):
             pretag = "Passenger car"
             return ", ".join([
-                pretag, fuel, size, str(year), "EURO-6"])
+                pretag, fuel, size, str(year), "EURO-6d"])
         def get_old_eurox_act(region, fuel, size, eurox):
             if region == "EUR":
                 ei_loc = "RER"
@@ -268,10 +268,10 @@ class TransportLCAReporting(LCAReporting):
         characterization method for an BEV activity.
         """
 
-        methods = ('ILCD 2.0 2018 midpoint',
+        method = ('ILCD 2.0 2018 midpoint',
                   'resources', 'minerals and metals')
         year = self.years[0]
-        act_str = "Passenger car, BEV, Van, {}, EURO-6".format(year)
+        act_str = "Passenger car, BEV, Van, {}, EURO-6d".format(year)
 
         # upstream material demands are the same for all regions
         # so we can use GLO here
