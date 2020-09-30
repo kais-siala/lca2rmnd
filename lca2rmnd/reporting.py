@@ -132,11 +132,11 @@ class TransportLCAReporting(LCAReporting):
                 tech = varsp.pop(0)
 
                 if tech == "Liquids":
-                    euro6share = max(0.25, min(1, 0.075*(year - 2020) + 0.25))
+                    euro6share = max(0., min(1, 0.075*(year - 2025) + 0.25))
                     diesel_str = get_actstr("ICEV-d", veh_size)
                     petrol_str = get_actstr("ICEV-p", veh_size)
-                    if year >= 2030:
-                        # only EURO 6 from 2030 on
+                    if year >= 2035:
+                        # only EURO 6 from 2035 on
                         cars = {
                             Activity(
                                 Act.get((Act.name == diesel_str)
