@@ -324,8 +324,12 @@ class TransportLCAReporting(LCAReporting):
                                 .index.get_level_values(0)
                                 .unique())]
                 # flatten dictionaries
-                demand = {k: v for item in demand for k, v in item.items()}
-                lca = bw.LCA(demand)
+                demand_flat = {}
+                for item in demand:
+                    for act, val in item.items():
+                        demand_flat[k] = val + demand_flat.get(k, 0)
+
+                lca = bw.LCA(demand_flat)
                 # build inventories
                 lca.lci()
                 for code in bioflows:
@@ -360,21 +364,15 @@ class TransportLCAReporting(LCAReporting):
         for year in self.years:
             db = bw.Database(eidb_label(self.scenario, year))
             for region in df.index.get_level_values(1).unique():
-                # create large lca demand object
-                demand = [
-                    self._act_from_variable(
-                        var, db, year, region,
-                        scale=df.loc[(year, region, var), "value"])
-                    for var in (df.loc[(year, region)]
-                                .index.get_level_values(0)
-                                .unique())]
-                # flatten dictionaries
-                demand = {k: v for item in demand for k, v in item.items()}
-                for act in demand:
-                    for ex in act.biosphere():
-                        result[(year, region, ex["name"])] = (
-                            result.get((year, region, ex["name"]), 0)
-                            + ex["amount"] * demand[act])
+                for var in (df.loc[(year, region)]
+                            .index.get_level_values(0)
+                            .unique()):
+                    for act, share in self._act_from_variable(
+                            var, db, year, region).items():
+                        for ex in act.biosphere():
+                            result[(year, region, ex["name"])] = (
+                                result.get((year, region, ex["name"]), 0)
+                                + ex["amount"] * share * df.loc[(year, region, var), "value"])
 
         df_result = pd.Series(result)
         print("Calculation took {} seconds.".format(time.time() - start))
@@ -382,6 +380,7 @@ class TransportLCAReporting(LCAReporting):
 
     def report_endpoint(self):
         """
+        *DEPRECATED*
         Report the surplus extraction costs for the scenario.
 
         :return: A `pandas.Series` containing extraction costs
@@ -468,8 +467,12 @@ class TransportLCAReporting(LCAReporting):
                                 .index.get_level_values(0)
                                 .unique())]
                 # flatten dictionaries
-                demand = {k: v for item in demand for k, v in item.items()}
-                lca = bw.LCA(demand, method=self.methods[0])
+                demand_flat = {}
+                for item in demand:
+                    for act, val in item.items():
+                        demand_flat[k] = val + demand_flat.get(k, 0)
+
+                lca = bw.LCA(demand_flat, method=self.methods[0])
                 # build inventories
                 lca.lci()
                 for method in self.methods:
@@ -486,6 +489,7 @@ class TransportLCAReporting(LCAReporting):
 
     def report_midpoint_to_endpoint(self):
         """
+        *DEPRECATED*
         Report midpoint impacts for the full fleet for each scenario.
 
         :return: A `pandas.Series` containing impacts
