@@ -33,11 +33,12 @@ class LCAReporting():
         calculate the scores for, defaults to ReCiPe Midpoint (H)
     :vartype source_db: str
     """
-    def __init__(self, scenario, years, remind_output_folder,
+    def __init__(self, scenario, years, project,
+                 remind_output_folder,
                  indicatorgroup='ReCiPe Midpoint (H) V1.13'):
         self.years = years
         self.scenario = scenario
-        bw.projects.set_current(project_string(scenario))
+        bw.projects.set_current(project)
         self.selector = ActivitySelector()
         self.methods = [m for m in bw.methods if m[0] == indicatorgroup
                         and m[1] != "climate change"]
@@ -47,14 +48,14 @@ class LCAReporting():
                               " project for the following group: {}.")
                              .format(indicatorgroup))
 
-        # check for brightway2 databases
-        dbnames = set(["_".join(["ecoinvent", scenario, str(yr)])
-                       for yr in years])
-        missing = dbnames - set(bw.databases)
-        if missing:
-            raise ValueError(
-                "The following brightway2 databases are missing: {}"
-                .format(missing))
+        # # check for brightway2 databases
+        # dbnames = set(["_".join(["ecoinvent", scenario, str(yr)])
+        #                for yr in years])
+        # missing = dbnames - set(bw.databases)
+        # if missing:
+        #     raise ValueError(
+        #         "The following brightway2 databases are missing: {}"
+        #         .format(missing))
         rdc = RemindDataCollection(self.scenario, remind_output_folder)
         self.data = rdc.data[rdc.data.Year.isin(self.years) &
                              (rdc.data.Region != "World")]
@@ -83,131 +84,34 @@ class TransportLCAReporting(LCAReporting):
 
     """
 
-    # European diesel share
-    diesel_share = 0.45
+    # available variables
+    techs = ["BEV", "FCEV", "Gases", "Hybrid Liquids", "Hybrid Electric", "Liquids"]
+    variables = ["ES|Transport|VKM|Pass|Road|LDV|" + tech for tech in techs]
 
     def _act_from_variable(self, variable, db, year, region, scale=1):
         """
         Find the activity for a given REMIND transport reporting variable.
         """
-        def get_actstr(fuel, size):
-            pretag = "Passenger car"
-            return ", ".join([
-                pretag, fuel, size, str(year), "EURO-6d"])
-        def get_old_eurox_act(region, fuel, size, eurox):
-            if region == "EUR":
-                ei_loc = "RER"
-            else:
-                ei_loc = "RoW"
-            rough_size = "medium"
-            if size in ["Two-Wheelers", "Mini", "Small"]:
-                rough_size = "small"
-            elif size in ["SUV", "Van"]:
-                rough_size = "large"
-            actstr = ", ".join([
-                "transport, passenger car",
-                "{} size".format(rough_size),
-                fuel, "EURO {}".format(eurox)])
+        def get_act(variable):
+            techmap = {
+                "BEV": "BEV",
+                "FCEV": "FCEV",
+                "Gases": "ICEV-g",
+                "Hybrid Electric": "PHEV-p",
+                "Hybrid Liquids": "HEV-p",
+                "Liquids": "ICEV-p"
+            }
             return Activity(
-                Act.get((Act.name == actstr)
-                        & (Act.location == ei_loc)
+                Act.get((Act.name.startswith(
+                    "Passenger car, fleet average, {}, {}".format(
+                        variable.split("|")[-1], year)
+                ))
+                        & (Act.location == region)
                         & (Act.database == db.name)))
 
-        # discard "ES|Transport|VKM"
-        varsp = variable.split("|")[3:]
-        if varsp.pop(0) == "Pass" and varsp.pop(0) == "Road":
-            if varsp.pop(0) == "LDV" and len(varsp) == 2:
-                fueltechmap = {
-                    "BEV": "BEV",
-                    "Gases": "ICEV-g",
-                    "Liquids": {"diesel": "ICEV-d",
-                                "petrol": "ICEV-p"},
-                    "FCEV": "FCEV",
-                    "Hybrid Electric": {"diesel": "PHEV-d",
-                                        "petrol": "PHEV-p"},
-                    "Hybrid Liquids": {"diesel": "HEV-d",
-                                       "petrol": "HEV-p"}
-                }
-                veh_size = varsp.pop(0)
-                tech = varsp.pop(0)
-
-                if tech == "Liquids":
-                    euro6share = max(0., min(1, 0.075*(year - 2025) + 0.25))
-                    diesel_str = get_actstr("ICEV-d", veh_size)
-                    petrol_str = get_actstr("ICEV-p", veh_size)
-                    if year >= 2035:
-                        # only EURO 6 from 2035 on
-                        cars = {
-                            Activity(
-                                Act.get((Act.name == diesel_str)
-                                        & (Act.location == region)
-                                        & (Act.database == db.name))):
-                            scale * self.diesel_share,
-                            Activity(
-                                Act.get((Act.name == petrol_str)
-                                        & (Act.location == region)
-                                        & (Act.database == db.name))):
-                            scale * (1-self.diesel_share)
-                        }
-                    else:
-                        cars = {
-                            # EURO 3-5
-                            **{
-                                get_old_eurox_act(region, "diesel", veh_size, x):
-                                (1-euro6share) * scale * self.diesel_share / 3
-                                for x in range(3, 6)
-                            },
-                            **{
-                                get_old_eurox_act(region, "petrol", veh_size, x):
-                                (1-euro6share) * scale * (1-self.diesel_share) / 3
-                                for x in range(3, 6)
-                            },
-                            # EURO 6
-                            Activity(
-                                Act.get((Act.name == diesel_str)
-                                        & (Act.location == region)
-                                        & (Act.database == db.name))):
-                            euro6share * scale * self.diesel_share,
-                            Activity(
-                                Act.get((Act.name == petrol_str)
-                                        & (Act.location == region)
-                                        & (Act.database == db.name))):
-                            euro6share * scale * (1-self.diesel_share)
-                        }
-                    return cars
-
-                if tech in ["Hybrid Liquids", "Hybrid Electric"]:
-                    # similar to Liquids, but regionlized due to el. markets
-                    fueltechs = fueltechmap[tech]
-                    diesel_str = get_actstr(fueltechs["diesel"], veh_size)
-                    petrol_str = get_actstr(fueltechs["petrol"], veh_size)
-                    diesel_act = Activity(
-                        Act.get((Act.name == diesel_str)
-                                & (Act.location == region)
-                                & (Act.database == db.name)))
-                    petrol_act = Activity(
-                        Act.get((Act.name == petrol_str)
-                                & (Act.location == region)
-                                & (Act.database == db.name)))
-                    return {
-                        diesel_act: scale*(self.diesel_share),
-                        petrol_act: scale*(1 - self.diesel_share)
-                    }
-                elif tech == "Gases":
-                    # only global activities exist
-                    act_str = get_actstr(fueltechmap[tech], veh_size)
-                    return {
-                        Activity(
-                            Act.get((Act.name == act_str)
-                                    & (Act.database == db.name))): scale}
-                else:
-                    # these other techs are regionalized
-                    act_str = get_actstr(fueltechmap[tech], veh_size)
-                    return {
-                        Activity(
-                            Act.get((Act.name == act_str)
-                                    & (Act.database == db.name)
-                                    & (Act.location == region))): scale}
+        return {
+            get_act(variable): scale
+        }
 
     def report_LDV_LCA(self):
         """
@@ -220,15 +124,8 @@ class TransportLCAReporting(LCAReporting):
         :rtype: pandas.DataFrame
 
         """
-        # available variables
-        variables = [
-            var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
-            and "Two-Wheelers" not in var]
-        # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 8]
 
-        df = self.data[self.data.Variable.isin(variables)]
+        df = self.data[self.data.Variable.isin(self.variables)]
 
         df.loc[:, "score_pkm"] = 0.
         # add methods dimension & score column
@@ -271,7 +168,7 @@ class TransportLCAReporting(LCAReporting):
         method = ('ILCD 2.0 2018 midpoint',
                   'resources', 'minerals and metals')
         year = self.years[0]
-        act_str = "Passenger car, BEV, Van, {}, EURO-6d".format(year)
+        act_str = "Passenger car, fleet average, BEV, {}".format(year)
 
         # upstream material demands are the same for all regions
         # so we can use GLO here
@@ -298,15 +195,8 @@ class TransportLCAReporting(LCAReporting):
         """
         # materials
         bioflows = self._get_material_bioflows_for_bev()
-        # available variables
-        variables = [
-            var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
-            and "Two-Wheelers" not in var]
-        # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 8]
 
-        df = self.data[self.data.Variable.isin(variables)]
+        df = self.data[self.data.Variable.isin(self.variables)]
 
         df.set_index(["Year", "Region", "Variable"], inplace=True)
         start = time.time()
@@ -327,7 +217,7 @@ class TransportLCAReporting(LCAReporting):
                 demand_flat = {}
                 for item in demand:
                     for act, val in item.items():
-                        demand_flat[k] = val + demand_flat.get(k, 0)
+                        demand_flat[act] = val + demand_flat.get(act, 0)
 
                 lca = bw.LCA(demand_flat)
                 # build inventories
@@ -348,14 +238,8 @@ class TransportLCAReporting(LCAReporting):
         """
         Report the direct (exhaust) emissions of the LDV fleet.
         """
-        variables = [
-            var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
-            and "Two-Wheelers" not in var]
-        # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 8]
 
-        df = self.data[self.data.Variable.isin(variables)]
+        df = self.data[self.data.Variable.isin(self.variables)]
 
         df.set_index(["Year", "Region", "Variable"], inplace=True)
         start = time.time()
@@ -390,15 +274,8 @@ class TransportLCAReporting(LCAReporting):
         endpoint_methods = [m for m in bw.methods if m[0] == indicatorgroup
                    and m[2] == "total"
                    and not m[1] == "total"]
-        # available variables
-        variables = [
-            var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
-            and "Two-Wheelers" not in var]
-        # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 8]
 
-        df = self.data[self.data.Variable.isin(variables)]
+        df = self.data[self.data.Variable.isin(self.variables)]
 
         df.set_index(["Year", "Region", "Variable"], inplace=True)
         start = time.time()
@@ -441,15 +318,8 @@ class TransportLCAReporting(LCAReporting):
         :return: A `pandas.Series` containing impacts
           with index `year`,`region` and `method`.
         """
-        # available variables
-        variables = [
-            var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
-            and "Two-Wheelers" not in var]
-        # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 8]
 
-        df = self.data[self.data.Variable.isin(variables)]
+        df = self.data[self.data.Variable.isin(self.variables)]
 
         df.set_index(["Year", "Region", "Variable"], inplace=True)
         start = time.time()
@@ -495,18 +365,11 @@ class TransportLCAReporting(LCAReporting):
         :return: A `pandas.Series` containing impacts
           with index `year`,`region` and `method`.
         """
-        # available variables
-        variables = [
-            var for var in self.data.Variable.unique()
-            if var.startswith("ES|Transport|VKM|Pass|Road|LDV")
-            and "Two-Wheelers" not in var]
-        # only high detail entries
-        variables = [var for var in variables if len(var.split("|")) == 8]
         methods = [m for m in bw.methods
                    if m[0] == "ReCiPe Endpoint (H,A) (obsolete)"
                    and m[2] != "total"]
 
-        df = self.data[self.data.Variable.isin(variables)]
+        df = self.data[self.data.Variable.isin(self.variables)]
 
         df.set_index(["Year", "Region", "Variable"], inplace=True)
         start = time.time()
@@ -599,7 +462,7 @@ class ElectricityLCAReporting(LCAReporting):
         result["score_kWh"] = result["total_score"] / (result["total_demand"] * 2.8e11)
 
 
-        return result[["Year", "Region", "method", "total_score", "score_kWh"]]
+        return result[["Year", "Region", "method", "total_score", "score_kWh"]].drop_duplicates()
 
     def _sum_variables_and_add_scores(self, market, variables):
         """
