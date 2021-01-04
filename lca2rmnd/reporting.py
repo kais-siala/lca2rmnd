@@ -3,8 +3,8 @@ from .data_collection import RemindDataCollection
 from .activity_select import ActivitySelector
 from .utils import project_string
 
-from rmnd_lca import Geomap, InventorySet
-from rmnd_lca.utils import eidb_label
+from premise import Geomap, InventorySet
+from premise.utils import eidb_label
 
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 import brightway2 as bw
@@ -34,10 +34,12 @@ class LCAReporting():
     :vartype source_db: str
     """
     def __init__(self, scenario, years, project,
-                 remind_output_folder,
+                 remind_output_folder, regions,
                  indicatorgroup='ReCiPe Midpoint (H) V1.13'):
         self.years = years
         self.scenario = scenario
+        self.model = "remind"
+        self.regions = regions
         bw.projects.set_current(project)
         self.selector = ActivitySelector()
         self.methods = [m for m in bw.methods if m[0] == indicatorgroup
@@ -59,6 +61,8 @@ class LCAReporting():
         rdc = RemindDataCollection(self.scenario, remind_output_folder)
         self.data = rdc.data[rdc.data.Year.isin(self.years) &
                              (rdc.data.Region != "World")]
+        # all regions there?
+        assert self.regions in self.data.Region.unique()
         self.geo = Geomap()
 
 
@@ -92,26 +96,56 @@ class TransportLCAReporting(LCAReporting):
         """
         Find the activity for a given REMIND transport reporting variable.
         """
-        def get_act(variable):
-            techmap = {
-                "BEV": "BEV",
-                "FCEV": "FCEV",
-                "Gases": "ICEV-g",
-                "Hybrid Electric": "PHEV-p",
-                "Hybrid Liquids": "HEV-p",
-                "Liquids": "ICEV-p"
+        techmap = {
+            "BEV": "BEV",
+            "FCEV": "FCEV",
+            "Gases": "ICEV-g",
+            "Hybrid Electric": {
+                "diesel": "PHEV-d",
+                "petrol": "PHEV-p"
+            },
+            "Hybrid Liquids": {
+                "diesel": "HEV-d",
+                "petrol": "HEV-p"
+            },
+            "Liquids": {
+                "diesel": "ICEV-d",
+                "petrol": "ICEV-p"
             }
-            return Activity(
-                Act.get((Act.name.startswith(
-                    "Passenger car, fleet average, {}, {}".format(
-                        variable.split("|")[-1], year)
-                ))
-                        & (Act.location == region)
-                        & (Act.database == db.name)))
-
-        return {
-            get_act(variable): scale
         }
+        tech = variable.split("|")[-1]
+        liq_share = {
+            "diesel": 0.4,
+            "petrol": 0.6
+        }
+        if tech in ["Hybrid Electric", "Hybrid Liquids", "Liquids"]:
+            if region in ["CHA", "REF", "IND"]:
+                demand = {
+                    Activity(Act.get(
+                        (Act.name == "transport, passenger car, fleet average, {}, {}".format(
+                            techmap[tech]["petrol"], year))
+                        & (Act.location == region)
+                        & (Act.database == db.name))): scale
+                }
+            else:
+                demand = {
+                    Activity(Act.get(
+                        (Act.name == "transport, passenger car, fleet average, {}, {}".format(
+                            techmap[tech][liq], year))
+                        & (Act.location == region)
+                        & (Act.database == db.name))): scale * liq_share[liq]
+                    for liq in ["diesel", "petrol"]
+                }
+            return demand
+        else:
+            return  {
+                Activity(
+                    Act.get(
+                        (Act.name == "transport, passenger car, fleet average, {}, {}".format(
+                            techmap[tech], year))
+                        & (Act.location == region)
+                        & (Act.database == db.name))): scale
+            }
 
     def report_LDV_LCA(self):
         """
@@ -134,12 +168,13 @@ class TransportLCAReporting(LCAReporting):
 
         df.set_index(["Year", "Region", "Variable", "Method"], inplace=True)
         start = time.time()
+
         # calc score
         for year in self.years:
             # find activities which at the moment do not depend
             # on regions
-            db = bw.Database(eidb_label(self.scenario, year))
-            for region in df.index.get_level_values(1).unique():
+            db = bw.Database(eidb_label(self.model, self.scenario, year))
+            for region in self.regions:
                 for var in (df.loc[(year, region)]
                             .index.get_level_values(0)
                             .unique()):
@@ -168,15 +203,15 @@ class TransportLCAReporting(LCAReporting):
         method = ('ILCD 2.0 2018 midpoint',
                   'resources', 'minerals and metals')
         year = self.years[0]
-        act_str = "Passenger car, fleet average, BEV, {}".format(year)
+        act_str = "transport, passenger car, fleet average, BEV, {}".format(year)
 
         # upstream material demands are the same for all regions
         # so we can use GLO here
         act = Activity(
             Act.get((Act.name == act_str)
                     & (Act.database == eidb_label(
-                        self.scenario, year))
-                    & (Act.location == "RER")))
+                        self.model, self.scenario, year))
+                    & (Act.location == "EUR")))
         lca = bw.LCA({act: 1}, method=method)
         lca.lci()
         lca.lcia()
@@ -199,12 +234,13 @@ class TransportLCAReporting(LCAReporting):
         df = self.data[self.data.Variable.isin(self.variables)]
 
         df.set_index(["Year", "Region", "Variable"], inplace=True)
+
         start = time.time()
         result = {}
         # calc score
         for year in self.years:
-            db = bw.Database(eidb_label(self.scenario, year))
-            for region in df.index.get_level_values(1).unique():
+            db = bw.Database(eidb_label(self.model, self.scenario, year))
+            for region in self.regions:
                 # create large lca demand object
                 demand = [
                     self._act_from_variable(
@@ -242,12 +278,13 @@ class TransportLCAReporting(LCAReporting):
         df = self.data[self.data.Variable.isin(self.variables)]
 
         df.set_index(["Year", "Region", "Variable"], inplace=True)
+
         start = time.time()
         result = {}
         # calc score
         for year in self.years:
-            db = bw.Database(eidb_label(self.scenario, year))
-            for region in df.index.get_level_values(1).unique():
+            db = bw.Database(eidb_label(self.model, self.scenario, year))
+            for region in self.regions:
                 for var in (df.loc[(year, region)]
                             .index.get_level_values(0)
                             .unique()):
@@ -282,8 +319,8 @@ class TransportLCAReporting(LCAReporting):
         result = {}
         # calc score
         for year in self.years:
-            db = bw.Database(eidb_label(self.scenario, year))
-            for region in df.index.get_level_values(1).unique():
+            db = bw.Database(eidb_label(self.model, self.scenario, year))
+            for region in self.regions:
                 # create large lca demand object
                 demand = [
                     self._act_from_variable(
@@ -326,8 +363,8 @@ class TransportLCAReporting(LCAReporting):
         result = {}
         # calc score
         for year in self.years:
-            db = bw.Database(eidb_label(self.scenario, year))
-            for region in df.index.get_level_values(1).unique():
+            db = bw.Database(eidb_label(self.model, self.scenario, year))
+            for region in self.regions:
                 # create large lca demand object
                 demand = [
                     self._act_from_variable(
@@ -376,8 +413,8 @@ class TransportLCAReporting(LCAReporting):
         result = {}
         # calc score
         for year in self.years:
-            db = bw.Database(eidb_label(self.scenario, year))
-            for region in df.index.get_level_values(1).unique():
+            db = bw.Database(eidb_label(self.model, self.scenario, year))
+            for region in self.regions:
                 # create large lca demand object
                 demand = [
                     self._act_from_variable(
@@ -483,8 +520,8 @@ class ElectricityLCAReporting(LCAReporting):
 
         # calc score
         for year in self.years:
-            db = bw.Database(eidb_label(self.scenario, year))
-            for region in df.Region.unique():
+            db = bw.Database(eidb_label(self.model, self.scenario, year))
+            for region in self.regions:
                 # import ipdb;ipdb.set_trace()
                 # find activity
                 act = [a for a in db if a["name"] == market and
@@ -521,14 +558,13 @@ class ElectricityLCAReporting(LCAReporting):
 
         db = bw.Database("_".join(["ecoinvent", self.scenario, str(year)]))
 
-        regions = self._get_rmnd_regions()
         result = self._cartesian_product({
-            "region": regions,
+            "region": self.regions,
             "tech": list(tecdict.keys()),
             "method": self.methods
         }).sort_index()
 
-        for region in regions:
+        for region in self.regions:
             # read the ecoinvent techs for the entries
             shares = self.supplier_shares(db, region)
 
@@ -558,13 +594,6 @@ class ElectricityLCAReporting(LCAReporting):
         """
         index = pd.MultiIndex.from_product(idx.values(), names=idx.keys())
         return pd.DataFrame(index=index)
-
-    def _get_rmnd_regions(self):
-        """Obtain a list of REMIND regions."""
-        regionmap = pd.read_csv(
-            DATA_DIR/"remind/regionmappingH12.csv",
-            sep=";")
-        return regionmap.RegionCode.unique()
 
     def _find_suppliers(self, db, expr, locs):
         """
@@ -609,7 +638,7 @@ class ElectricityLCAReporting(LCAReporting):
         vols = pd.read_csv(DATA_DIR/"electricity_production_volumes_per_tech.csv",
                            sep=";", index_col=["dataset", "location"])
 
-        # the filters come from the rmnd_lca package
+        # the filters come from the premise package
         # this package is also used to modify the techs in the first place
         fltrs = InventorySet(db).powerplant_filters
         act_shares = {}

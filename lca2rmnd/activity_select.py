@@ -1,4 +1,4 @@
-from rmnd_lca import InventorySet
+from premise import InventorySet
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 from functools import reduce
 
@@ -6,7 +6,7 @@ class ActivitySelector():
     """
     Maps ecoinvent activites to REMIND technologies.
 
-    Uses filter definitions from :class:`rmnd_lca.InventorySet`.
+    Uses filter definitions from :class:`premise.InventorySet`.
 
     :param db: A lice cycle inventory database
     :type db: brightway2 database object
@@ -16,7 +16,7 @@ class ActivitySelector():
         Create a :class:`peewee.Expression` from a filter dictionary.
 
         For the specification of the filter dictionary please refer to the
-        documentation of :class:`rmnd_lca.InventorySet`.
+        documentation of :class:`premise.InventorySet`.
 
         :param fltr: string, list of strings or dictionary.
             If a string is provided, it is used to match the name field from the start (*startswith*).

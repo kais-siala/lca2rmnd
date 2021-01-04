@@ -1,7 +1,7 @@
 # content of test_activity_maps.py
 from lca2rmnd.activity_select import ActivitySelector
 
-from rmnd_lca import InventorySet, Geomap
+from premise import InventorySet, Geomap
 from bw2data.database import DatabaseChooser
 from bw2data.backends.peewee.proxies import ActivityDataset as Act
 

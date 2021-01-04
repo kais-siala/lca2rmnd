@@ -5,8 +5,8 @@ import brightway2 as bw
 import math
 
 from lca2rmnd.reporting import ElectricityLCAReporting, TransportLCAReporting
-from rmnd_lca import InventorySet
-from rmnd_lca.utils import eidb_label
+from premise import InventorySet
+from premise.utils import eidb_label
 
 remind_regions = [
     'LAM', 'OAS', 'SSA', 'EUR',
@@ -18,7 +18,7 @@ bw.projects.set_current("transport_lca")
 
 years = [2050]
 scenario = "BAU"
-
+model = "remind"
 
 def test_electricity_sectoral_reporting():
     rep = ElectricityLCAReporting(scenario, years)
@@ -32,7 +32,7 @@ def test_electricity_supplier_shares_random():
     yr = random.choice(years)
     region = random.choice(remind_regions)
 
-    db = bw.Database(eidb_label(scenario, yr))
+    db = bw.Database(eidb_label(model, scenario, yr))
 
     shares = rep.supplier_shares(db, region)
 
@@ -48,7 +48,7 @@ def test_electricity_tech_reporting():
     yr = random.choice(years)
     region = random.choice(remind_regions)
 
-    db = bw.Database(eidb_label(scenario, yr))
+    db = bw.Database(eidb_label(model, scenario, yr))
     fltrs = InventorySet(db).powerplant_filters
     tech = random.choice(list(fltrs.keys()))
 

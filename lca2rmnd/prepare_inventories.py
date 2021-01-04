@@ -18,7 +18,7 @@ Usage example:
 
 """
 
-import rmnd_lca
+import premise
 from bw2data.utils import merge_databases
 
 from carculator import CarInputParameters, \
@@ -29,6 +29,8 @@ from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 import brightway2 as bw
 import numpy as np
 
+fpei36 = "/home/alois/ecoinvent/ecoinvent 3.6_cut-off_ecoSpold02/datasets/"
+model = "remind"
 
 def create_project(project_name, ecoinvent_path,
                    years, scenario, remind_data_path, from_scratch=True):
@@ -37,7 +39,7 @@ def create_project(project_name, ecoinvent_path,
     inventories for electricity markets according to
     REMIND data.
 
-    Relies on `rmnd_lca.NewDatabase`. Existing databases are
+    Relies on `premise.NewDatabase`. Existing databases are
     deleted.
 
     :param str project_name: name of the brightway2 project to modify
@@ -64,7 +66,7 @@ def create_project(project_name, ecoinvent_path,
         print("Database has already been imported")
     else:
         ei36 = bw.SingleOutputEcospold2Importer(
-            ecoinvent_path, 'ecoinvent 3.6 cutoff')
+            fpei36, 'ecoinvent 3.6 cutoff')
         ei36.apply_strategies()
         ei36.statistics()
         ei36.write_database()
@@ -72,12 +74,12 @@ def create_project(project_name, ecoinvent_path,
     for year in years:
         print("Create modified database for scenario {} and year {}"
               .format(scenario, year))
-        ndb = rmnd_lca.NewDatabase(
+        ndb = premise.NewDatabase(
             scenario=scenario,
             year=year,
             source_db='ecoinvent 3.6 cutoff',
             source_version=3.6,
-            filepath_to_remind_files=remind_data_path)
+            filepath_to_iam_files=remind_data_path)
         ndb.update_all()
         ndb.write_db_to_brightway()
 
@@ -117,7 +119,7 @@ def relink_electricity_demand(scenario, year):
     :param year: REMIND year.
 
     """
-    eidb = bw.Database(rmnd_lca.utils.eidb_label(scenario, year))
+    eidb = bw.Database(premise.utils.eidb_label(model, scenario, year))
     remind_regions = [
         'LAM', 'OAS', 'SSA', 'EUR',
         'NEU', 'MEA', 'REF', 'CAZ',
@@ -193,7 +195,7 @@ def load_and_merge(scenario, years, relink=True):
         from market groups in REMIND regions
     """
     for year in years:
-        eidb = rmnd_lca.utils.eidb_label(scenario, year)
+        eidb = premise.utils.eidb_label(model, scenario, year)
         inv = load_car_activities(np.array([year]))
         inv.apply_strategies()
 
