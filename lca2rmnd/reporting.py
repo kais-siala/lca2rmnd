@@ -63,7 +63,7 @@ class LCAReporting():
                              (rdc.data.Region != "World")]
         # all regions there?
         assert self.regions in self.data.Region.unique()
-        self.geo = Geomap()
+        self.geo = Geomap(self.model)
 
 
 class TransportLCAReporting(LCAReporting):

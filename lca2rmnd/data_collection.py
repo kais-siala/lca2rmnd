@@ -15,7 +15,7 @@ class RemindDataCollection():
         filename = self.scenario + ".mif"
         filepath_remind_files = (filepath_remind_files or DATA_DIR / "remind" )
 
-        fname = filepath_remind_files / "{}.mif".format(scenario)
+        fname = filepath_remind_files / "remind_{}.mif".format(scenario)
 
         if os.path.exists(fname):
             self.rmndpath = fname
