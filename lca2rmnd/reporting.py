@@ -42,9 +42,6 @@ class LCAReporting():
         self.regions = regions
         bw.projects.set_current(project)
         self.selector = ActivitySelector()
-        self.methods = [m for m in bw.methods if m[0] == indicatorgroup
-                        and m[1] != "climate change"]
-        self.methods.append(('IPCC 2013', 'climate change', 'GWP 100a'))
         if not self.methods:
             raise ValueError(("No methods found in the current brightway2"
                               " project for the following group: {}.")
