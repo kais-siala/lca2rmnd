@@ -35,14 +35,14 @@ class LCAReporting():
     """
     def __init__(self, scenario, years, project,
                  remind_output_folder, regions,
-                 indicatorgroup='ReCiPe Midpoint (H) V1.13'):
+                 methods):
         self.years = years
         self.scenario = scenario
         self.model = "remind"
         self.regions = regions
         bw.projects.set_current(project)
         self.selector = ActivitySelector()
-        self.methods = [m for m in bw.methods if m[0] == indicatorgroup]
+        self.methods = methods
 
         if not self.methods:
             raise ValueError(("No methods found in the current brightway2"
@@ -96,20 +96,20 @@ class TransportLCAReporting(LCAReporting):
         Find the activity for a given REMIND transport reporting variable.
         """
         techmap = {
-            "BEV": "BEV",
-            "FCEV": "FCEV",
-            "Gases": "ICEV-g",
+            "BEV": "battery electric",
+            "FCEV": "fuel cell electric",
+            "Gases": "compressed gas",
             "Hybrid Electric": {
-                "diesel": "PHEV-d",
-                "petrol": "PHEV-p"
+                "diesel": "plugin diesel hybrid",
+                "petrol": "plugin gasoline hybrid"
             },
             "Hybrid Liquids": {
-                "diesel": "HEV-d",
-                "petrol": "HEV-p"
+                "diesel": "diesel hybrid",
+                "petrol": "gasoline hybrid"
             },
             "Liquids": {
-                "diesel": "ICEV-d",
-                "petrol": "ICEV-p"
+                "diesel": "diesel",
+                "petrol": "gasoline"
             }
         }
         tech = variable.split("|")[-1]
@@ -186,8 +186,11 @@ class TransportLCAReporting(LCAReporting):
                     for method in self.methods:
                         lca.switch_method(method)
                         lca.lcia()
+                        fct = 1.
+                        if "_LowD" in self.scenario:
+                            fct = max(1 - (year - 2020)/15 * 0.15, 0.85)
                         df.loc[(year, region, var, method),
-                               "score_pkm"] = lca.score
+                               "score_pkm"] = lca.score * fct
         print("Calculation took {} seconds.".format(time.time() - start))
         df["total_score"] = df["value"] * df["score_pkm"] * 1e9
         return df[["total_score", "score_pkm"]]
@@ -202,7 +205,7 @@ class TransportLCAReporting(LCAReporting):
         method = ('ILCD 2.0 2018 midpoint',
                   'resources', 'minerals and metals')
         year = self.years[0]
-        act_str = "transport, passenger car, fleet average, BEV, {}".format(year)
+        act_str = "transport, passenger car, fleet average, battery electric, {}".format(year)
 
         # upstream material demands are the same for all regions
         # so we can use GLO here
