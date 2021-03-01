@@ -183,12 +183,13 @@ class TransportLCAReporting(LCAReporting):
                     # build inventories
                     lca.lci()
 
+                    if "_LowD" in self.scenario:
+                        fct = max(1 - (year - 2020)/15 * 0.15, 0.85)
+                    else:
+                        fct = 1.
                     for method in self.methods:
                         lca.switch_method(method)
                         lca.lcia()
-                        fct = 1.
-                        if "_LowD" in self.scenario:
-                            fct = max(1 - (year - 2020)/15 * 0.15, 0.85)
                         df.loc[(year, region, var, method),
                                "score_pkm"] = lca.score * fct
         print("Calculation took {} seconds.".format(time.time() - start))
