@@ -34,12 +34,11 @@ class LCAReporting():
     :vartype source_db: str
     """
     def __init__(self, scenario, years, project,
-                 remind_output_folder, regions,
-                 methods):
+                 remind_output_folder,
+                 methods, regions=None):
         self.years = years
         self.scenario = scenario
         self.model = "remind"
-        self.regions = regions
         bw.projects.set_current(project)
         self.selector = ActivitySelector()
         self.methods = methods
@@ -60,8 +59,12 @@ class LCAReporting():
         rdc = RemindDataCollection(self.scenario, remind_output_folder)
         self.data = rdc.data[rdc.data.Year.isin(self.years) &
                              (rdc.data.Region != "World")]
-        # all regions there?
-        assert self.regions in self.data.Region.unique()
+        if regions is None:
+            self.regions = self.data.Region.unique()
+        else:
+            # all regions there?
+            self.regions = regions
+            assert self.regions in self.data.Region.unique()
         self.geo = Geomap(self.model)
 
 
