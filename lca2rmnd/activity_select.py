@@ -1,4 +1,3 @@
-from premise import InventorySet
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 from functools import reduce
 

@@ -3,7 +3,8 @@ from .data_collection import RemindDataCollection
 from .activity_select import ActivitySelector
 from .utils import project_string
 
-from premise import Geomap, InventorySet
+from premise import Geomap
+from premise.activity_maps import InventorySet
 from premise.utils import eidb_label
 
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
