@@ -10,6 +10,7 @@ from premise.utils import eidb_label
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 import brightway2 as bw
 import pandas as pd
+import numpy as np
 from bw2analyzer import ContributionAnalysis
 
 import time
@@ -30,7 +31,7 @@ class LCAReporting():
         and 20 years for the last two time steps).
         The corresponding brightway databases have to be part of the current project.
     :vartype year: array
-    :ivar indicatorgroup: name of the set of indicators to
+    :ivar methods: set of indicators to
         calculate the scores for, defaults to ReCiPe Midpoint (H)
     :vartype source_db: str
     """
@@ -45,9 +46,7 @@ class LCAReporting():
         self.methods = methods
 
         if not self.methods:
-            raise ValueError(("No methods found in the current brightway2"
-                              " project for the following group: {}.")
-                             .format(indicatorgroup))
+            raise ValueError("No methods provided.")
 
         # # check for brightway2 databases
         # dbnames = set(["_".join(["ecoinvent", scenario, str(yr)])
@@ -139,16 +138,21 @@ class TransportLCAReporting(LCAReporting):
                         & (Act.database == db.name))): scale * liq_share[liq]
                     for liq in ["diesel", "petrol"]
                 }
-            return demand
         else:
-            return  {
-                Activity(
-                    Act.get(
-                        (Act.name == "transport, passenger car, fleet average, {}, {}".format(
-                            techmap[tech], year))
-                        & (Act.location == region)
-                        & (Act.database == db.name))): scale
-            }
+            try:
+                demand = {
+                    Activity(
+                        Act.get(
+                            (Act.name == "transport, passenger car, fleet average, {}, {}".format(
+                                techmap[tech], year))
+                            & (Act.location == region)
+                            & (Act.database == db.name))): scale
+                }
+            except ActivityDatasetDoesNotExist as e:
+                print("No activity found for {}, {} in {}".format(techmap[tech], year, db.name))
+                demand = {}
+        return demand
+
 
     def report_LDV_LCA(self):
         """
@@ -165,6 +169,7 @@ class TransportLCAReporting(LCAReporting):
         df = self.data[self.data.Variable.isin(self.variables)]
 
         df.loc[:, "score_pkm"] = 0.
+        df.loc[:, "score_pkm_direct"] = 0.
         # add methods dimension & score column
         methods_df = pd.DataFrame({"Method": self.methods, "score_pkm": 0.})
         df = df.merge(methods_df, "outer")  # on "score_pkm"
@@ -177,16 +182,23 @@ class TransportLCAReporting(LCAReporting):
             # find activities which at the moment do not depend
             # on regions
             db = bw.Database(eidb_label(self.model, self.scenario, year))
+            fleet_acts = [a for a in db if a["name"].startswith("transport, passenger car, fleet average")]
+            lca = bw.LCA({fleet_acts[0]: 1})
+            lca.lci()
+            fleet_idxs = [lca.activity_dict[a.key] for a in fleet_acts]
+
             for region in self.regions:
                 for var in (df.loc[(year, region)]
                             .index.get_level_values(0)
                             .unique()):
                     demand = self._act_from_variable(var, db, year, region)
+
                     lca = bw.LCA(demand,
                                  method=self.methods[0])
                     # build inventories
                     lca.lci()
 
+                    ## this is a workaround to correct for higher loadfactors in the LowD scenarios
                     if "_LowD" in self.scenario:
                         fct = max(1 - (year - 2020)/15 * 0.15, 0.85)
                     else:
@@ -194,10 +206,15 @@ class TransportLCAReporting(LCAReporting):
                     for method in self.methods:
                         lca.switch_method(method)
                         lca.lcia()
-                        df.loc[(year, region, var, method),
+
+                        df.at[(year, region, var, method),
                                "score_pkm"] = lca.score * fct
+                        res_vec = np.squeeze(np.asarray(lca.characterized_inventory.sum(axis=0)))
+                        df.at[(year, region, var, method), "score_pkm_direct"] = \
+                            np.sum(res_vec[fleet_idxs]) * fct
         print("Calculation took {} seconds.".format(time.time() - start))
         df["total_score"] = df["value"] * df["score_pkm"] * 1e9
+        df["total_score_direct"] = df["value"] * df["score_pkm_direct"] * 1e9
         return df[["total_score", "score_pkm"]]
 
     def _get_material_bioflows_for_bev(self):
@@ -279,6 +296,7 @@ class TransportLCAReporting(LCAReporting):
 
     def report_direct_emissions(self):
         """
+        ***DEPRECATED***
         Report the direct (exhaust) emissions of the LDV fleet.
         """
 
@@ -357,6 +375,7 @@ class TransportLCAReporting(LCAReporting):
 
     def report_midpoint(self):
         """
+        *DEPRECATED*
         Report midpoint impacts for the full fleet for each scenario.
 
         :return: A `pandas.Series` containing impacts
@@ -497,16 +516,8 @@ class ElectricityLCAReporting(LCAReporting):
         df_medvolt = self._sum_variables_and_add_scores(market, medium_voltage)
 
         result = pd.concat([df_lowvolt, df_medvolt])
-        result["total_demand"] = result["value"]\
-                                 .groupby([result.Region, result.Year])\
-                                 .transform("sum")
-        result["total_score"] = result["total_score"]\
-                                .groupby([result.Region, result.Year, result.method])\
-                                .transform("sum")
-        result["score_kWh"] = result["total_score"] / (result["total_demand"] * 2.8e11)
 
-
-        return result[["Year", "Region", "method", "total_score", "score_kWh"]].drop_duplicates()
+        return result
 
     def _sum_variables_and_add_scores(self, market, variables):
         """
@@ -518,39 +529,42 @@ class ElectricityLCAReporting(LCAReporting):
                  .groupby(["Region", "Year"])\
                  .sum()
         df.reset_index(inplace=True)
-        df["market"] = market
+        df["Market"] = market
 
         # add methods dimension & score column
-        methods_df = pd.DataFrame({"method": self.methods, "market": market})
+        methods_df = pd.DataFrame({"Method": self.methods, "Market": market})
         df = df.merge(methods_df)
         df.loc[:, "score"] = 0.
+        df.loc[:, "score_direct"] = 0.
+        df.set_index(["Year", "Region", "Method"], inplace=True)
 
         # calc score
         for year in self.years:
             db = bw.Database(eidb_label(self.model, self.scenario, year))
+            # database indexes of powerplants
+            pps = [pp for pp in db if pp["unit"] == "kilowatt hour" and "market" not in pp["name"]]
+            lca = bw.LCA({pps[0]: 1})
+            lca.lci()
+            pp_idxs = [lca.activity_dict[pp.key] for pp in pps]
             for region in self.regions:
-                # import ipdb;ipdb.set_trace()
                 # find activity
                 act = [a for a in db if a["name"] == market and
                        a["location"] == region][0]
                 # create first lca object
-                lca = bw.LCA({act: 1}, method=df.method[0])
+                lca = bw.LCA({act: 1}, method=self.methods[0])
                 # build inventories
                 lca.lci()
 
-                df_slice = df[(df.Year == year) &
-                              (df.Region == region)]
-
-                def get_score(method):
+                for method in self.methods:
                     lca.switch_method(method)
                     lca.lcia()
-                    return lca.score
 
-                df_slice.loc[:, "score"] = df_slice.apply(
-                    lambda row: get_score(row["method"]), axis=1)
-                df.update(df_slice)
+                    df.at[(year, region, method), "score"] = lca.score
+                    res_vec = np.squeeze(np.asarray(lca.characterized_inventory.sum(axis=0)))
+                    df.at[(year, region, method), "score_direct"] = np.sum(res_vec[pp_idxs])
 
         df["total_score"] = df["score"] * df["value"] * 2.8e11  # EJ -> kWh
+        df["total_score_direct"] = df["score_direct"] * df["value"] * 2.8e11  # EJ -> kWh
         return df
 
     def report_tech_LCA(self, year):
@@ -563,7 +577,7 @@ class ElectricityLCAReporting(LCAReporting):
         tecf = pd.read_csv(DATA_DIR/"powertechs.csv", index_col="tech")
         tecdict = tecf.to_dict()["mif_entry"]
 
-        db = bw.Database("_".join(["ecoinvent", self.scenario, str(year)]))
+        db = bw.Database(eidb_label(self.model, self.scenario, year))
 
         result = self._cartesian_product({
             "region": self.regions,
@@ -584,6 +598,8 @@ class ElectricityLCAReporting(LCAReporting):
                     lca.switch_method(method)
                     lca.lcia()
                     result.at[(region, tech, method), "score"] = lca.score
+                    res_vec = np.squeeze(np.asarray(lca.characterized_inventory.sum(axis=0)))
+                    result.at[(region, tech, method), "score_direct"] = np.sum(res_vec[pp_idxs])
 
         return result
 
