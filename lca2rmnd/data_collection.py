@@ -30,7 +30,7 @@ class RemindDataCollection():
         * variable
         * year
 
-        :return: an multi-dimensional array with Remind data
+        :return: a multi-dimensional array with Remind data
         :rtype: xarray.core.dataarray.DataArray
 
         """

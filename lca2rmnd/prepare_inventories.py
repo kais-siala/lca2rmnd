@@ -1,23 +1,3 @@
-"""Module to prepare the ecoinvent databases for reporting LCA results
-for REMIND scenarios using the carculator inventories, see
-
-https://github.com/romainsacchi/carculator
-
-Usage example:
-    years = [2015, 2050]
-    scenario = "BAU"
-    project_name = "transport_lca"
-
-    fpei36 = "ecoinvent/ecoinvent 3.6_cut-off_ecoSpold02/datasets/"
-    create_project(project_name, fpei36, years, scenario, "data/remind/")
-    load_and_merge(scenario, years)
-
-    # test
-    act = bw.Database("ecoinvent_BAU_2015").random()
-    bw.LCA({act: 1}, bw.methods.random()).lci()
-
-"""
-
 import premise
 from bw2data.utils import merge_databases
 
@@ -28,9 +8,6 @@ from carculator import CarInputParameters, \
 from bw2data.backends.peewee.proxies import Activity, ActivityDataset as Act
 import brightway2 as bw
 import numpy as np
-
-fpei36 = "/home/alois/ecoinvent/ecoinvent 3.6_cut-off_ecoSpold02/datasets/"
-model = "remind"
 
 def create_project(project_name, ecoinvent_path,
                    years, scenario, remind_data_path, from_scratch=True):
